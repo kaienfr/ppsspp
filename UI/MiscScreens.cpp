@@ -425,6 +425,7 @@ void CreditsScreen::render() {
 		"",
 		"",
 		c->T("contributors", "Contributors:"),
+		"kaienfr",
 		"unknownbrackets",
 		"oioitff",
 		"xsacha",
