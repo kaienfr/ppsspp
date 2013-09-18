@@ -57,10 +57,10 @@ void ComputeVertexShaderID(VertexShaderID *id, int prim, bool useHWTransform) {
 	const u32 vertType = gstate.vertType;
 	int doTexture = gstate.isTextureMapEnabled() && !gstate.isModeClear();
 	bool doTextureProjection = gstate.getUVGenMode() == GE_TEXMAP_TEXTURE_MATRIX;
+	bool doShadeMapping = gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP;
 
 	bool hasColor = (vertType & GE_VTYPE_COL_MASK) != 0;
 	bool hasNormal = (vertType & GE_VTYPE_NRM_MASK) != 0;
-	bool hasBones = gstate.getWeightMask() != GE_VTYPE_WEIGHT_NONE;
 	bool enableFog = gstate.isFogEnabled() && !gstate.isModeThrough() && !gstate.isModeClear();
 	bool lmode = gstate.isUsingSecondaryColor() && gstate.isLightingEnabled();
 
@@ -83,20 +83,20 @@ void ComputeVertexShaderID(VertexShaderID *id, int prim, bool useHWTransform) {
 		id->d[0] |= gstate.getUVGenMode() << 16;
 
 		// The next bits are used differently depending on UVgen mode
-		if (gstate.getUVGenMode() == GE_TEXMAP_TEXTURE_MATRIX) {
+		if (doTextureProjection) {
 			id->d[0] |= gstate.getUVProjMode() << 18;
-		} else if (gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP) {
+		} else if (doShadeMapping) {
 			id->d[0] |= gstate.getUVLS0() << 18;
 			id->d[0] |= gstate.getUVLS1() << 20;
 		}
 
 		// Bones
-		if (hasBones)
+		if (gstate.isSkinningEnabled())
 			id->d[0] |= (TranslateNumBones(gstate.getNumBoneWeights()) - 1) << 22;
 
 		// Okay, d[1] coming up. ==============
 
-		if (gstate.isLightingEnabled() || gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP) {
+		if (gstate.isLightingEnabled() || doShadeMapping) {
 			// Light bits
 			for (int i = 0; i < 4; i++) {
 				id->d[1] |= gstate.getLightComputation(i) << (i * 4);
@@ -153,18 +153,19 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 
 	int lmode = gstate.isUsingSecondaryColor() && gstate.isLightingEnabled();
 	int doTexture = gstate.isTextureMapEnabled() && !gstate.isModeClear();
+	bool doTextureProjection = gstate.getUVGenMode() == GE_TEXMAP_TEXTURE_MATRIX;
+	bool doShadeMapping = gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP;
 
 	bool hasColor = (vertType & GE_VTYPE_COL_MASK) != 0 || !useHWTransform;
 	bool hasNormal = (vertType & GE_VTYPE_NRM_MASK) != 0 && useHWTransform;
 	bool enableFog = gstate.isFogEnabled() && !gstate.isModeThrough() && !gstate.isModeClear();
 	bool throughmode = (vertType & GE_VTYPE_THROUGH_MASK) != 0;
 	bool flipV = gstate_c.flipTexture;
-	bool doTextureProjection = gstate.getUVGenMode() == GE_TEXMAP_TEXTURE_MATRIX;
 
 	DoLightComputation doLight[4] = {LIGHT_OFF, LIGHT_OFF, LIGHT_OFF, LIGHT_OFF};
 	if (useHWTransform) {
-		int shadeLight0 = gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP ? gstate.getUVLS0() : -1;
-		int shadeLight1 = gstate.getUVGenMode() == GE_TEXMAP_ENVIRONMENT_MAP ? gstate.getUVLS1() : -1;
+		int shadeLight0 = doShadeMapping ? gstate.getUVLS0() : -1;
+		int shadeLight1 = doShadeMapping ? gstate.getUVLS1() : -1;
 		for (int i = 0; i < 4; i++) {
 			if (i == shadeLight0 || i == shadeLight1)
 				doLight[i] = LIGHT_SHADE;
@@ -173,7 +174,7 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 		}
 	}
 
-	if (gstate.getWeightMask() != GE_VTYPE_WEIGHT_NONE) {
+	if (gstate.isSkinningEnabled()) {
 		WRITE(p, "%s", boneWeightAttrDecl[TranslateNumBones(gstate.getNumBoneWeights())]);
 	}
 
@@ -208,9 +209,9 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 		// When transforming by hardware, we need a great deal more uniforms...
 		WRITE(p, "uniform mat4 u_world;\n");
 		WRITE(p, "uniform mat4 u_view;\n");
-		if (gstate.getUVGenMode() == GE_TEXMAP_TEXTURE_MATRIX)
+		if (doTextureProjection)
 			WRITE(p, "uniform mediump mat4 u_texmtx;\n");
-		if (gstate.getWeightMask() != GE_VTYPE_WEIGHT_NONE) {
+		if (gstate.isSkinningEnabled()) {
 			int numBones = TranslateNumBones(gstate.getNumBoneWeights());
 #ifdef USE_BONE_ARRAY
 			WRITE(p, "uniform mediump mat4 u_bone[%i];\n", numBones);
@@ -229,14 +230,13 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 				WRITE(p, "uniform vec3 u_lightpos%i;\n", i);
 			}
 			if (doLight[i] == LIGHT_FULL) {
-				// These are needed for the full thing
-				WRITE(p, "uniform mediump vec3 u_lightdir%i;\n", i);
 				GELightType type = gstate.getLightType(i);
 
 				if (type != GE_LIGHTTYPE_DIRECTIONAL)
 					WRITE(p, "uniform mediump vec3 u_lightatt%i;\n", i);
 
 				if (type == GE_LIGHTTYPE_SPOT || type == GE_LIGHTTYPE_UNKNOWN) { 
+					WRITE(p, "uniform mediump vec3 u_lightdir%i;\n", i);
 					WRITE(p, "uniform mediump float u_lightangle%i;\n", i);
 					WRITE(p, "uniform mediump float u_lightspotCoef%i;\n", i);
 				}
@@ -299,7 +299,7 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 		}
 	} else {
 		// Step 1: World Transform / Skinning
-		if (gstate.getWeightMask() == GE_VTYPE_WEIGHT_NONE) {
+		if (!gstate.isSkinningEnabled()) {
 			// No skinning, just standard T&L.
 			WRITE(p, "  vec3 worldpos = (u_world * vec4(a_position.xyz, 1.0)).xyz;\n");
 			if (hasNormal)
@@ -449,6 +449,10 @@ void GenerateVertexShader(int prim, char *buffer, bool useHWTransform) {
 
 			if (poweredDiffuse) {
 				WRITE(p, "  mediump float dot%i = pow(dot(toLight, worldnormal), u_matspecular.a);\n", i);
+				// Ugly NaN check.  pow(0.0, 0.0) may be undefined, but PSP seems to treat it as 1.0.
+				// Seen in Tales of the World: Radiant Mythology (#2424.)
+				WRITE(p, "  if (!(dot%i < 1.0) && !(dot%i > 0.0))\n", i, i);
+				WRITE(p, "    dot%i = 1.0;\n", i);
 			} else {
 				WRITE(p, "  mediump float dot%i = dot(toLight, worldnormal);\n", i);
 			}

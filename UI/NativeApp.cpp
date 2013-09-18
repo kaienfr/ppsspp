@@ -371,7 +371,7 @@ void NativeInit(int argc, const char *argv[],
 	g_Config.memCardDirectory = "MemStick/";
 #endif	
 
-	i18nrepo.LoadIni(g_Config.languageIni);
+	i18nrepo.LoadIni(g_Config.sLanguageIni);
 	I18NCategory *d = GetI18NCategory("DesktopUI");
 	// Note to translators: do not translate this/add this to PPSSPP-lang's files. 
 	// It's intended to be custom for every user. 
@@ -598,7 +598,15 @@ void NativeDeviceLost() {
 }
 
 bool NativeIsAtTopLevel() {
-	return false;
+	Screen *currentScreen = screenManager->topScreen();
+	if (currentScreen) {
+		bool top = currentScreen->isTopLevel();
+		ILOG("Screen toplevel: %i", (int)top);
+		return currentScreen->isTopLevel();
+	} else {
+		ELOG("No current screen");
+		return false;
+	}
 }
 
 void NativeTouch(const TouchInput &touch) {

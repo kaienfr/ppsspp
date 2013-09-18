@@ -389,7 +389,7 @@ int sceKernelDcacheWritebackAll();
 int sceKernelDcacheWritebackRange(u32 addr, int size);
 int sceKernelDcacheWritebackInvalidateRange(u32 addr, int size);
 int sceKernelDcacheWritebackInvalidateAll();
-void sceKernelGetThreadStackFreeSize();
+int sceKernelGetThreadStackFreeSize(SceUID threadID);
 u32 sceKernelIcacheInvalidateAll();
 u32 sceKernelIcacheClearAll();
 int sceKernelIcacheInvalidateRange(u32 addr, int size);
@@ -416,7 +416,7 @@ public:
 
 	virtual void DoState(PointerWrap &p)
 	{
-		_dbg_assert_msg_(HLE, false, "Unable to save state: bad kernel object.");
+		_dbg_assert_msg_(SCEKERNEL, false, "Unable to save state: bad kernel object.");
 	}
 };
 
@@ -427,7 +427,7 @@ public:
 	~KernelObjectPool() {}
 
 	// Allocates a UID within the range and inserts the object into the map.
-	SceUID Create(KernelObject *obj, int rangeBottom = 16, int rangeTop = 0x7fffffff);
+	SceUID Create(KernelObject *obj, int rangeBottom = initialNextID, int rangeTop = 0x7fffffff);
 
 	void DoState(PointerWrap &p);
 	static KernelObject *CreateByIDType(int type);
@@ -451,7 +451,7 @@ public:
 	{
 		if (handle < handleOffset || handle >= handleOffset+maxCount || !occupied[handle-handleOffset])
 		{
-			WARN_LOG(HLE, "Kernel: Bad object handle %i (%08x)", handle, handle);
+			WARN_LOG(SCEKERNEL, "Kernel: Bad object handle %i (%08x)", handle, handle);
 			outError = T::GetMissingErrorCode();
 			return 0;
 		}
@@ -463,7 +463,7 @@ public:
 			T* t = static_cast<T*>(pool[handle - handleOffset]);
 			if (t == 0 || t->GetIDType() != T::GetStaticIDType())
 			{
-				WARN_LOG(HLE, "Kernel: Wrong object type for %i (%08x)", handle, handle);
+				WARN_LOG(SCEKERNEL, "Kernel: Wrong object type for %i (%08x)", handle, handle);
 				outError = T::GetMissingErrorCode();
 				return 0;
 			}
@@ -479,7 +479,7 @@ public:
 		const SceUID realHandle = handle - handleOffset;
 		if (realHandle < 0 || realHandle >= maxCount || !occupied[realHandle])
 		{
-			ERROR_LOG(HLE, "Kernel: Bad fast object handle %i (%08x)", handle, handle);
+			ERROR_LOG(SCEKERNEL, "Kernel: Bad fast object handle %i (%08x)", handle, handle);
 			return 0;
 		}
 		return static_cast<T *>(pool[realHandle]);
@@ -505,7 +505,7 @@ public:
 	{
 		if (handle < handleOffset || handle >= handleOffset+maxCount || !occupied[handle-handleOffset])
 		{
-			ERROR_LOG(HLE, "Kernel: Bad object handle %i (%08x)", handle, handle);
+			ERROR_LOG(SCEKERNEL, "Kernel: Bad object handle %i (%08x)", handle, handle);
 			return false;
 		}
 		KernelObject *t = pool[handle - handleOffset];
@@ -520,8 +520,9 @@ public:
 
 private:
 	enum {
-		maxCount=4096,
-		handleOffset=0x100
+		maxCount = 4096,
+		handleOffset = 0x100,
+		initialNextID = 0x10
 	};
 	KernelObject *pool[maxCount];
 	bool occupied[maxCount];

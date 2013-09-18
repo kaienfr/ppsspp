@@ -57,7 +57,7 @@ int PSPMsgDialog::Init(unsigned int paramAddr)
 	int optionsNotCoded = ((messageDialog.options | SCE_UTILITY_MSGDIALOG_DEBUG_OPTION_CODED) ^ SCE_UTILITY_MSGDIALOG_DEBUG_OPTION_CODED);
 	if(optionsNotCoded)
 	{
-		ERROR_LOG_REPORT(HLE, "PSPMsgDialog options not coded : 0x%08x", optionsNotCoded);
+		ERROR_LOG_REPORT(SCEUTILITY, "PSPMsgDialog options not coded : 0x%08x", optionsNotCoded);
 	}
 
 	flag = 0;
@@ -296,12 +296,16 @@ int PSPMsgDialog::Shutdown(bool force)
 void PSPMsgDialog::DoState(PointerWrap &p)
 {
 	PSPDialog::DoState(p);
+
+	auto s = p.Section("PSPMsgDialog", 1);
+	if (!s)
+		return;
+
 	p.Do(flag);
 	p.Do(messageDialog);
 	p.Do(messageDialogAddr);
 	p.DoArray(msgText, sizeof(msgText));
 	p.Do(yesnoChoice);
-	p.DoMarker("PSPMsgDialog");
 }
 
 pspUtilityDialogCommon *PSPMsgDialog::GetCommonParam()

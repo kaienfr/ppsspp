@@ -31,6 +31,8 @@
 
 #if defined(ARM)
 #include "ARM/ArmJit.h"
+#elif defined(PPC)
+#include "PPC/PpcJit.h"
 #else
 #include "x86/Jit.h"
 #endif
@@ -145,6 +147,10 @@ void MIPSState::Reset()
 }
 
 void MIPSState::DoState(PointerWrap &p) {
+	auto s = p.Section("MIPSState", 1);
+	if (!s)
+		return;
+
 	// Reset the jit if we're loading.
 	if (p.mode == p.MODE_READ)
 		Reset();
@@ -170,7 +176,6 @@ void MIPSState::DoState(PointerWrap &p) {
 	p.Do(inDelaySlot);
 	p.Do(llBit);
 	p.Do(debugCount);
-	p.DoMarker("MIPSState");
 }
 
 void MIPSState::SingleStep()
@@ -228,6 +233,13 @@ u32 MIPSState::ReadFCR(int reg)
 		// MessageBox(0, "Invalid FCR","...",0);
 	}
 	return 0;
+}
+
+void MIPSState::InvalidateICache(u32 address, int length)
+{
+	// Only really applies to jit.
+	if (MIPSComp::jit)
+		MIPSComp::jit->ClearCacheAt(address, length);
 }
 
 

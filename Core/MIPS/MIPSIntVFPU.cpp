@@ -49,6 +49,7 @@
 #include "MIPSVFPUUtils.h"
 
 #include <limits>
+#include <algorithm>
 
 #define R(i)   (currentMIPS->r[i])
 #define V(i)   (currentMIPS->v[i])
@@ -1365,6 +1366,7 @@ namespace MIPSInt
 		}
 		else
 		{
+			Reporting::ReportMessage("Trying to interpret instruction that can't be interpreted (BADVTFM)");
 			_dbg_assert_msg_(CPU,0,"Trying to interpret instruction that can't be interpreted (BADVTFM)");
 		}
 		WriteVector(d, sz, vd);
@@ -1675,7 +1677,7 @@ namespace MIPSInt
 		}
 		else
 		{
-			_dbg_assert_msg_(CPU,0,"Bad Imm3 in cmov");
+			ERROR_LOG_REPORT(CPU, "Bad Imm3 in cmov: %d", imm3);
 		}
 		ApplyPrefixD(d, sz);
 		WriteVector(d, sz, vd);
@@ -1756,6 +1758,7 @@ bad:
 			break;
 
 		default:
+			Reporting::ReportMessage("CrossQuat instruction with wrong size");
 			_dbg_assert_msg_(CPU,0,"Trying to interpret instruction that can't be interpreted");
 			break;
 		}

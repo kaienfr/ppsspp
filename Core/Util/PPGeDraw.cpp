@@ -135,10 +135,11 @@ static u32 __PPGeDoAlloc(u32 &size, bool fromTop, const char *name) {
 
 void __PPGeInit()
 {
-	if (PSP_CoreParameter().gpuCore == GPU_NULL) {
+	// PPGe isn't really important for headless, and LoadZIM takes a long time.
+	if (PSP_CoreParameter().gpuCore == GPU_NULL || host->ShouldSkipUI()) {
 		// Let's just not bother.
 		dlPtr = 0;
-		NOTICE_LOG(HLE, "Not initializing PPGe - GPU is NullGpu");
+		NOTICE_LOG(SCEGE, "Not initializing PPGe - GPU is NullGpu");
 		return;
 	}
 	u8 *imageData;
@@ -147,7 +148,7 @@ void __PPGeInit()
 	int flags;
 	if (!LoadZIM("ppge_atlas.zim", &width, &height, &flags, &imageData)) {
 		PanicAlert("Failed to load ppge_atlas.zim.\n\nPlace it in the directory \"assets\" under your PPSSPP directory.");
-		ERROR_LOG(HLE, "PPGe init failed - no atlas texture. PPGe stuff will not be drawn.");
+		ERROR_LOG(SCEGE, "PPGe init failed - no atlas texture. PPGe stuff will not be drawn.");
 		return;
 	}
 
@@ -181,12 +182,16 @@ void __PPGeInit()
 	
 	free(imageData);
 
-	DEBUG_LOG(HLE, "PPGe drawing library initialized. DL: %08x Data: %08x Atlas: %08x (%i) Ctx: %08x",
+	DEBUG_LOG(SCEGE, "PPGe drawing library initialized. DL: %08x Data: %08x Atlas: %08x (%i) Ctx: %08x",
 		dlPtr, dataPtr, atlasPtr, atlasSize, savedContextPtr);
 }
 
 void __PPGeDoState(PointerWrap &p)
 {
+	auto s = p.Section("PPGeDraw", 1);
+	if (!s)
+		return;
+
 	p.Do(atlasPtr);
 	p.Do(atlasWidth);
 	p.Do(atlasHeight);
@@ -208,8 +213,6 @@ void __PPGeDoState(PointerWrap &p)
 
 	p.Do(char_lines);
 	p.Do(char_lines_metrics);
-
-	p.DoMarker("PPGeDraw");
 }
 
 void __PPGeShutdown()
@@ -281,7 +284,7 @@ void PPGeEnd()
 
 		// We actually drew something
 		u32 list = sceGeListEnQueueHead(dlPtr, dlWritePtr, -1, 0);
-		DEBUG_LOG(HLE, "PPGe enqueued display list %i", list);
+		DEBUG_LOG(SCEGE, "PPGe enqueued display list %i", list);
 		gpu->EnableInterrupts(true);
 		sceGeContinue();
 		sceGeRestoreContext(savedContextPtr);

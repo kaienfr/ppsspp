@@ -44,6 +44,7 @@ public:
 
 	virtual void InitSound(PMixer *mixer) = 0;
 	virtual void UpdateSound() {}
+	virtual void UpdateScreen() {}
 	virtual void ShutdownSound() = 0;
 	virtual void PollControllers(InputState &input_state) {}
 
@@ -72,6 +73,7 @@ public:
 #endif
 
 	// Used for headless.
+	virtual bool ShouldSkipUI() { return false; }
 	virtual void SendDebugOutput(const std::string &output) {}
 	virtual void SendDebugScreenshot(const u8 *pixbuf, u32 w, u32 h) {}
 };

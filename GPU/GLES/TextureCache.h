@@ -115,7 +115,7 @@ private:
 
 	void Decimate();  // Run this once per frame to get rid of old textures.
 	void *UnswizzleFromMem(u32 texaddr, u32 bufw, u32 bytesPerPixel, u32 level);
-	void *readIndexedTex(int level, u32 texaddr, int bytesPerIndex, GLuint dstFmt);
+	void *ReadIndexedTex(int level, u32 texaddr, int bytesPerIndex, GLuint dstFmt, int bufw);
 	void UpdateSamplingParams(TexCacheEntry &entry, bool force);
 	void LoadTextureLevel(TexCacheEntry &entry, int level, bool replaceImages);
 	void *DecodeTextureLevel(GETextureFormat format, GEPaletteFormat clutformat, int level, u32 &texByteAlign, GLenum &dstFmt);
@@ -126,12 +126,14 @@ private:
 	void UpdateCurrentClut();
 	void AttachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer, bool exactMatch);
 	void DetachFramebuffer(TexCacheEntry *entry, u32 address, VirtualFramebuffer *framebuffer);
+	void SetTextureFramebuffer(TexCacheEntry *entry);
 
 	TexCacheEntry *GetEntryAt(u32 texaddr);
 
 	typedef std::map<u64, TexCacheEntry> TexCache;
 	TexCache cache;
 	TexCache secondCache;
+	std::vector<VirtualFramebuffer *> fbCache_;
 
 	bool clearCacheNextFrame_;
 	bool lowMemoryMode_;

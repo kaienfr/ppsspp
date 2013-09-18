@@ -21,6 +21,7 @@
 #include "Common/FileUtil.h"
 #include "Config.h"
 #include "file/ini_file.h"
+#include "i18n/i18n.h"
 #include "HLE/sceUtility.h"
 #include "Common/CPUDetect.h"
 
@@ -35,14 +36,16 @@ Config::~Config() { }
 
 void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 {
-	iniFilename_ = iniFileName;
-	controllerIniFilename_ = controllerIniFilename;
-	INFO_LOG(LOADER, "Loading config: %s", iniFileName);
+	iniFilename_ = iniFileName != NULL ? iniFileName : "ppsspp.ini";
+
+	controllerIniFilename_ = controllerIniFilename != NULL ? controllerIniFilename : "controls.ini";
+
+	INFO_LOG(LOADER, "Loading config: %s", iniFilename_.c_str());
 	bSaveSettings = true;
 
 	IniFile iniFile;
-	if (!iniFile.Load(iniFileName)) {
-		ERROR_LOG(LOADER, "Failed to read %s. Setting config to default.", iniFileName);
+	if (!iniFile.Load(iniFilename_)) {
+		ERROR_LOG(LOADER, "Failed to read %s. Setting config to default.", iniFilename_.c_str());
 		// Continue anyway to initialize the config.
 	}
 
@@ -55,7 +58,16 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	general->Get("IgnoreBadMemAccess", &bIgnoreBadMemAccess, true);
 	general->Get("CurrentDirectory", &currentDirectory, "");
 	general->Get("ShowDebuggerOnLoad", &bShowDebuggerOnLoad, false);
-	general->Get("Language", &languageIni, "en_US");
+
+	std::string defaultLangRegion = "en_US";
+	if (bFirstRun) {
+		std::string langRegion = System_GetProperty(SYSPROP_LANGREGION);
+		if (i18nrepo.IniExists(langRegion))
+			defaultLangRegion = langRegion;
+		// TODO: Be smart about same language, different country
+	}
+
+	general->Get("Language", &sLanguageIni, defaultLangRegion.c_str());
 	general->Get("NumWorkerThreads", &iNumWorkerThreads, cpu_info.num_cores);
 	general->Get("EnableCheats", &bEnableCheats, false);
 	general->Get("ScreenshotsAsPNG", &bScreenshotsAsPNG, false);
@@ -63,7 +75,6 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	general->Get("GridView1", &bGridView1, true);
 	general->Get("GridView2", &bGridView2, true);
 	general->Get("GridView3", &bGridView3, true);
-
 
 	// "default" means let emulator decide, "" means disable.
 	general->Get("ReportingHost", &sReportHost, "default");
@@ -73,6 +84,8 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	general->Get("TopMost", &bTopMost);
 	general->Get("WindowX", &iWindowX, 40);
 	general->Get("WindowY", &iWindowY, 100);
+	general->Get("WindowWidth", &iWindowWidth, 0);   // 0 will be automatically reset later (need to do the AdjustWindowRect dance).
+	general->Get("WindowHeight", &iWindowHeight, 0);
 #endif
 
 	IniFile::Section *recent = iniFile.GetOrCreateSection("Recent");
@@ -89,8 +102,12 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 		std::string fileName;
 
 		sprintf(keyName,"FileName%d",i);
-		if (!recent->Get(keyName,&fileName,"") || fileName.length() == 0) break;
-		recentIsos.push_back(fileName);
+		if (!recent->Get(keyName,&fileName,"") || fileName.length() == 0) {
+			// just skip it to get the next key
+		}
+		else {
+			recentIsos.push_back(fileName);
+		}
 	}
 
 	IniFile::Section *cpu = iniFile.GetOrCreateSection("CPU");
@@ -110,11 +127,6 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 
 	IniFile::Section *graphics = iniFile.GetOrCreateSection("Graphics");
 	graphics->Get("ShowFPSCounter", &iShowFPSCounter, false);
-#ifdef _WIN32
-	graphics->Get("ResolutionScale", &iWindowZoom, 2);
-#else
-	graphics->Get("ResolutionScale", &iWindowZoom, 1);
-#endif
 	graphics->Get("RenderingMode", &iRenderingMode, 
 		// Many ARMv6 devices have serious problems with buffered rendering.
 #if defined(ARM) && !defined(ARMV7)
@@ -126,9 +138,16 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	graphics->Get("SoftwareRendering", &bSoftwareRendering, false);
 	graphics->Get("HardwareTransform", &bHardwareTransform, true);
 	graphics->Get("TextureFiltering", &iTexFiltering, 1);
-	graphics->Get("SSAA", &bAntiAliasing, 0);
+	// Auto on Windows, 1x elsewhere. Maybe change to 2x on large screens?
+#ifdef _WIN32
+	graphics->Get("InternalResolution", &iInternalResolution, 0);
+#else
+	graphics->Get("InternalResolution", &iInternalResolution, 1);
+#endif
+
 	graphics->Get("FrameSkip", &iFrameSkip, 0);
 	graphics->Get("FrameRate", &iFpsLimit, 0);
+	graphics->Get("FrameSkipUnthrottle", &bFrameSkipUnthrottle, true);
 	graphics->Get("ForceMaxEmulatedFPS", &iForceMaxEmulatedFPS, 60);
 #ifdef USING_GLES2
 	graphics->Get("AnisotropyLevel", &iAnisotropyLevel, 0);
@@ -141,7 +160,6 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	graphics->Get("VertexCache", &bVertexCache, true);
 #ifdef _WIN32
 	graphics->Get("FullScreen", &bFullScreen, false);
-	graphics->Get("FullScreenOnLaunch", &bFullScreenOnLaunch, false);
 #endif
 #ifdef BLACKBERRY
 	graphics->Get("PartialStretch", &bPartialStretch, pixel_xres == pixel_yres);
@@ -153,6 +171,8 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	graphics->Get("TexScalingType", &iTexScalingType, 0);
 	graphics->Get("TexDeposterize", &bTexDeposterize, false);
 	graphics->Get("VSyncInterval", &bVSync, false);
+	graphics->Get("DisableStencilTest", &bDisableStencilTest, false);
+	graphics->Get("AlwaysDepthWrite", &bAlwaysDepthWrite, false);
 
 	IniFile::Section *sound = iniFile.GetOrCreateSection("Sound");
 	sound->Get("Enable", &bEnableSound, true);
@@ -166,8 +186,8 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 #ifdef BLACKBERRY
 	control->Get("ShowTouchControls", &bShowTouchControls, pixel_xres != pixel_yres);
 #elif defined(USING_GLES2)
-	std::string name = System_GetName();
-	if (name == "NVIDIA:SHIELD" || name == "Sony Ericsson:R800i" || name == "Sony Ericsson:zeus") {
+	std::string name = System_GetProperty(SYSPROP_NAME);
+	if (KeyMap::HasBuiltinController(name)) {
 		control->Get("ShowTouchControls", &bShowTouchControls, false);
 	} else {
 		control->Get("ShowTouchControls", &bShowTouchControls, true);
@@ -178,11 +198,12 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	// control->Get("KeyMapping",iMappingMap);
 	control->Get("AccelerometerToAnalogHoriz", &bAccelerometerToAnalogHoriz, false);
 	control->Get("TouchButtonOpacity", &iTouchButtonOpacity, 65);
+	control->Get("TiltSensitivity", &iTiltSensitivity, 100);
 	control->Get("ButtonScale", &fButtonScale, 1.15);
 
 	IniFile::Section *pspConfig = iniFile.GetOrCreateSection("SystemParam");
 	pspConfig->Get("NickName", &sNickName, "PPSSPP");
-	pspConfig->Get("Language", &ilanguage, PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
+	pspConfig->Get("Language", &iLanguage, PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
 	pspConfig->Get("TimeFormat", &iTimeFormat, PSP_SYSTEMPARAM_TIME_FORMAT_24HR);
 	pspConfig->Get("DateFormat", &iDateFormat, PSP_SYSTEMPARAM_DATE_FORMAT_YYYYMMDD);
 	pspConfig->Get("TimeZone", &iTimeZone, 0);
@@ -206,16 +227,17 @@ void Config::Load(const char *iniFileName, const char *controllerIniFilename)
 	debugConfig->Get("FontWidth", &iFontWidth, 8);
 	debugConfig->Get("FontHeight", &iFontHeight, 12);
 	debugConfig->Get("DisplayStatusBar", &bDisplayStatusBar, true);
+	debugConfig->Get("ShowDeveloperMenu", &bShowDeveloperMenu, false);
 
 	IniFile::Section *gleshacks = iniFile.GetOrCreateSection("GLESHacks");
 	gleshacks->Get("PrescaleUV", &bPrescaleUV, false);
 
-	INFO_LOG(LOADER, "Loading controller config: %s", controllerIniFilename);
+	INFO_LOG(LOADER, "Loading controller config: %s", controllerIniFilename_.c_str());
 	bSaveSettings = true;
 
 	IniFile controllerIniFile;
-	if (!controllerIniFile.Load(controllerIniFilename)) {
-		ERROR_LOG(LOADER, "Failed to read %s. Setting controller config to default.", controllerIniFilename);
+	if (!controllerIniFile.Load(controllerIniFilename_)) {
+		ERROR_LOG(LOADER, "Failed to read %s. Setting controller config to default.", controllerIniFilename_.c_str());
 		KeyMap::RestoreDefault();
 	} else {
 		// Continue anyway to initialize the config. It will just restore the defaults.
@@ -250,8 +272,10 @@ void Config::Save() {
 		general->Set("TopMost", bTopMost);
 		general->Set("WindowX", iWindowX);
 		general->Set("WindowY", iWindowY);
+		general->Set("WindowWidth", iWindowWidth);
+		general->Set("WindowHeight", iWindowHeight);
 #endif
-		general->Set("Language", languageIni);
+		general->Set("Language", sLanguageIni);
 		general->Set("NumWorkerThreads", iNumWorkerThreads);
 		general->Set("EnableCheats", bEnableCheats);
 		general->Set("ScreenshotsAsPNG", bScreenshotsAsPNG);
@@ -263,12 +287,14 @@ void Config::Save() {
 		IniFile::Section *recent = iniFile.GetOrCreateSection("Recent");
 		recent->Set("MaxRecent", iMaxRecent);
 	
-		for (int i = 0; i < recentIsos.size(); i++)
-		{
+		for (int i = 0; i < iMaxRecent; i++) {
 			char keyName[64];
-			
 			sprintf(keyName,"FileName%d",i);
-			recent->Set(keyName,recentIsos[i]);
+			if (i < (int)recentIsos.size()) {
+				recent->Set(keyName, recentIsos[i]);
+			} else {
+				recent->Delete(keyName); // delete the nonexisting FileName
+			} 
 		}
 
 		IniFile::Section *cpu = iniFile.GetOrCreateSection("CPU");
@@ -280,20 +306,19 @@ void Config::Save() {
 
 		IniFile::Section *graphics = iniFile.GetOrCreateSection("Graphics");
 		graphics->Set("ShowFPSCounter", iShowFPSCounter);
-		graphics->Set("ResolutionScale", iWindowZoom);
 		graphics->Set("RenderingMode", iRenderingMode);
 		graphics->Set("SoftwareRendering", bSoftwareRendering);
 		graphics->Set("HardwareTransform", bHardwareTransform);
 		graphics->Set("TextureFiltering", iTexFiltering);
-		graphics->Set("SSAA", bAntiAliasing);
+		graphics->Set("InternalResolution", iInternalResolution);
 		graphics->Set("FrameSkip", iFrameSkip);
 		graphics->Set("FrameRate", iFpsLimit);
+		graphics->Set("FrameSkipUnthrottle", bFrameSkipUnthrottle);
 		graphics->Set("ForceMaxEmulatedFPS", iForceMaxEmulatedFPS);
 		graphics->Set("AnisotropyLevel", iAnisotropyLevel);
 		graphics->Set("VertexCache", bVertexCache);
 #ifdef _WIN32
 		graphics->Set("FullScreen", bFullScreen);
-		graphics->Set("FullScreenOnLaunch", bFullScreenOnLaunch);
 #endif		
 #ifdef BLACKBERRY
 		graphics->Set("PartialStretch", bPartialStretch);
@@ -305,6 +330,8 @@ void Config::Save() {
 		graphics->Set("TexScalingType", iTexScalingType);
 		graphics->Set("TexDeposterize", bTexDeposterize);
 		graphics->Set("VSyncInterval", bVSync);
+		graphics->Set("DisableStencilTest", bDisableStencilTest);
+		graphics->Set("AlwaysDepthWrite", bAlwaysDepthWrite);
 
 		IniFile::Section *sound = iniFile.GetOrCreateSection("Sound");
 		sound->Set("Enable", bEnableSound);
@@ -318,12 +345,13 @@ void Config::Save() {
 		control->Set("ShowTouchControls", bShowTouchControls);
 		// control->Set("KeyMapping",iMappingMap);
 		control->Set("AccelerometerToAnalogHoriz", bAccelerometerToAnalogHoriz);
+		control->Set("TiltSensitivity", iTiltSensitivity);
 		control->Set("TouchButtonOpacity", iTouchButtonOpacity);
 		control->Set("ButtonScale", fButtonScale);
 
 		IniFile::Section *pspConfig = iniFile.GetOrCreateSection("SystemParam");
 		pspConfig->Set("NickName", sNickName.c_str());
-		pspConfig->Set("Language", ilanguage);
+		pspConfig->Set("Language", iLanguage);
 		pspConfig->Set("TimeFormat", iTimeFormat);
 		pspConfig->Set("DateFormat", iDateFormat);
 		pspConfig->Set("TimeZone", iTimeZone);
@@ -347,6 +375,8 @@ void Config::Save() {
 		debugConfig->Set("FontWidth", iFontWidth);
 		debugConfig->Set("FontHeight", iFontHeight);
 		debugConfig->Set("DisplayStatusBar", bDisplayStatusBar);
+		debugConfig->Set("ShowDeveloperMenu", bShowDeveloperMenu);
+
 		if (!iniFile.Save(iniFilename_.c_str())) {
 			ERROR_LOG(LOADER, "Error saving config - can't write ini %s", iniFilename_.c_str());
 			return;
@@ -388,8 +418,19 @@ void Config::AddRecent(const std::string &file) {
 void Config::CleanRecent() {
 	std::vector<std::string> cleanedRecent;
 	for (size_t i = 0; i < recentIsos.size(); i++) {
-		if (File::Exists(recentIsos[i]))
-			cleanedRecent.push_back(recentIsos[i]);
+		if (File::Exists(recentIsos[i])){
+			// clean the redundant recent games' list.
+			if (cleanedRecent.size()==0){ // add first one
+					cleanedRecent.push_back(recentIsos[i]);
+			}
+			for (size_t j=0; j<cleanedRecent.size();j++){
+				if (cleanedRecent[j]==recentIsos[i])
+					break; // skip if found redundant
+				if (j==cleanedRecent.size()-1){ // add if no redundant found
+					cleanedRecent.push_back(recentIsos[i]);
+				}
+			}
+		}
 	}
 	recentIsos = cleanedRecent;
 }

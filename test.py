@@ -30,17 +30,19 @@ teamcity_mode = False
 TIMEOUT = 5
 
 class Command(object):
-  def __init__(self, cmd):
+  def __init__(self, cmd, data = None):
     self.cmd = cmd
+    self.data = data
     self.process = None
     self.output = None
     self.timeout = False
 
   def run(self, timeout):
     def target():
-      self.process = subprocess.Popen(self.cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-      self.output, _ = self.process.communicate()
-      self.output = self.output.decode("utf-8")
+      self.process = subprocess.Popen(self.cmd, bufsize=1, stdin=subprocess.PIPE, stdout=sys.stdout, stderr=subprocess.STDOUT)
+      self.process.stdin.write(self.data)
+      self.process.stdin.close()
+      self.process.communicate()
 
     thread = threading.Thread(target=target)
     thread.start()
@@ -69,6 +71,9 @@ tests_good = [
   "cpu/fpu/fpu",
 
   "audio/atrac/ids",
+  "audio/atrac/setdata",
+  "audio/mp3/mp3test",
+  "audio/sascore/sascore",
   "ctrl/ctrl",
   "ctrl/idle/idle",
   "ctrl/sampling/sampling",
@@ -76,6 +81,8 @@ tests_good = [
   "display/display",
   "display/vblankmulti",
   "dmac/dmactest",
+  "gpu/callbacks/ge_callbacks",
+  "hash/hash",
   "hle/check_not_used_uids",
   "intr/intr",
   "intr/vblank/vblank",
@@ -86,14 +93,19 @@ tests_good = [
   "misc/libc",
   "misc/dcache",
   "mstick/mstick",
+  "rtc/rtc",
   "string/string",
   "sysmem/freesize",
-  "gpu/callbacks/ge_callbacks",
+  "sysmem/sysmem",
   "threads/alarm/alarm",
   "threads/alarm/cancel/cancel",
   "threads/alarm/refer/refer",
   "threads/alarm/set/set",
   "threads/callbacks/callbacks",
+  "threads/callbacks/check",
+  "threads/callbacks/create",
+  "threads/callbacks/delete",
+  "threads/callbacks/refer",
   "threads/events/events",
   "threads/events/cancel/cancel",
   "threads/events/clear/clear",
@@ -157,13 +169,17 @@ tests_good = [
   "threads/semaphores/refer",
   "threads/semaphores/signal",
   "threads/semaphores/wait",
+  "threads/threads/change",
   "threads/threads/extend",
+  "threads/threads/refer",
   "threads/threads/release",
   "threads/threads/rotate",
+  "threads/threads/stackfree",
   "threads/threads/suspend",
   "threads/threads/threadend",
   "threads/threads/threads",
   "threads/wakeup/wakeup",
+  "threads/vpl/allocate",
   "threads/vpl/cancel",
   "threads/vpl/delete",
   "threads/vpl/free",
@@ -185,20 +201,20 @@ tests_good = [
 tests_next = [
 # These are the next tests up for fixing. These run by default.
   "audio/atrac/atractest",
-  "audio/mp3/mp3test",
-  "audio/sascore/sascore",
+  "audio/atrac/decode",
   "audio/sceaudio/datalen",
   "audio/sceaudio/output",
   "audio/sceaudio/reserve",
+  "display/hcount",
+  "threads/callbacks/cancel",
+  "threads/callbacks/count",
+  "threads/callbacks/notify",
   "threads/scheduling/dispatch",
   "threads/scheduling/scheduling",
-  "threads/threads/change",
   "threads/threads/create",
-  "threads/threads/refer",
   "threads/threads/start",
   "threads/threads/terminate",
   "threads/vtimers/vtimer",
-  "threads/vpl/allocate",
   "threads/vpl/create",
   "utility/savedata/autosave",
   "utility/savedata/getsize",
@@ -221,9 +237,10 @@ tests_next = [
   "io/io/io",
   "io/iodrv/iodrv",
   "modules/loadexec/loader",
-  "rtc/rtc",
+  "rtc/arithmetic",
+  "rtc/convert",
+  "rtc/lookup",
   "sysmem/partition",
-  "sysmem/sysmem",
   "umd/io/umd_io",
   "umd/raw_access/raw_access",
   "video/mpeg/basic",
@@ -280,103 +297,25 @@ def run_tests(test_list, args):
   tests_passed = []
   tests_failed = []
 
+  test_filenames = []
   for test in test_list:
     # Try prx first
-    expected_filename = TEST_ROOT + test + ".expected"
-
     elf_filename = TEST_ROOT + test + ".prx"
-    print(elf_filename)
-
     if not os.path.exists(elf_filename):
       print("WARNING: no prx, trying elf")
       elf_filename = TEST_ROOT + test + ".elf"
 
-    if not os.path.exists(elf_filename):
-      print("ERROR: PRX/ELF file missing, failing test: " + test)
-      tests_failed.append(test)
-      tcprint("##teamcity[testIgnored name='%s' message='PRX/ELF missing']" % test)
-      continue
+    test_filenames.append(elf_filename)
 
-    if not os.path.exists(expected_filename):
-      print("WARNING: expects file missing, failing test: " + test)
-      tests_failed.append(test)
-      tcprint("##teamcity[testIgnored name='%s' message='Expects file missing']" % test)
-      continue
+  if len(test_filenames):
+    # TODO: Maybe --compare should detect --graphics?
+    cmdline = [PPSSPP_EXE, '--compare', '--timeout=' + str(TIMEOUT), '@-']
+    cmdline.extend([i for i in args if i not in ['-g']])
 
-    expected_output = open(expected_filename).read().strip()
+    c = Command(cmdline, '\n'.join(test_filenames))
+    c.run(TIMEOUT * len(test_filenames))
 
-    tcprint("##teamcity[testStarted name='%s' captureStandardOutput='true']" % test)
-
-    cmdline = [PPSSPP_EXE, elf_filename]
-    cmdline.extend([i for i in args if i not in ['-v', '-g']])
-    if os.path.exists(expected_filename + ".bmp"):
-      cmdline.extend(["--screenshot=" + expected_filename + ".bmp", "--graphics"])
-
-    c = Command(cmdline)
-    c.run(TIMEOUT)
-
-    output = c.output.strip()
-
-    if c.timeout:
-      print(output)
-      print("Test exceded limit of %d seconds." % TIMEOUT)
-      tests_failed.append(test)
-      tcprint("##teamcity[testFailed name='%s' message='Test timeout']" % test)
-      tcprint("##teamcity[testFinished name='%s']" % test)
-      continue
-
-    if output.startswith("TESTERROR"):
-      print("Failed to run test " + elf_filename + "!")
-      tests_failed.append(test)
-      tcprint("##teamcity[testFailed name='%s' message='Failed to run test']" % test)
-      tcprint("##teamcity[testFinished name='%s']" % test)
-      continue
-
-    different = False
-    expected_lines = [x.strip() for x in expected_output.splitlines()]
-    output_lines = [x.strip() for x in output.splitlines()]
-
-    for i in range(0, min(len(output_lines), len(expected_lines))):
-      if output_lines[i] != expected_lines[i]:
-        print("E%i < %s" % (i + 1, expected_lines[i]))
-        print("O%i > %s" % (i + 1, output_lines[i]))
-        different = True
-
-    if len(output_lines) != len(expected_lines):
-      for i in range(len(output_lines), len(expected_lines)):
-        print("E%i < %s" % (i + 1, expected_lines[i]))
-      for i in range(len(expected_lines), len(output_lines)):
-        print("O%i > %s" % (i + 1, output_lines[i]))
-      print("*** Different number of lines!")
-      different = True
-
-    if not different:
-      if '-v' in args:
-        print("++++++++++++++ The Equal Output +++++++++++++")
-        print("\n".join(output_lines))
-        print("+++++++++++++++++++++++++++++++++++++++++++++")
-      print("  " + test + " - passed!")
-      tests_passed.append(test)
-      tcprint("##teamcity[testFinished name='%s']" % test)
-    else:
-      if '-v' in args:
-        print("============== output from failed " + test + " :")
-        print(output)
-        print("============== expected output:")
-        print(expected_output)
-        print("===============================")
-      tests_failed.append(test)
-      tcprint("##teamcity[testFailed name='%s' message='Output different from expected file']" % test)
-      tcprint("##teamcity[testFinished name='%s']" % test)
-
-  print("%i tests passed, %i tests failed." % (
-      len(tests_passed), len(tests_failed)))
-
-  if len(tests_failed):
-    print("Failed tests:")
-    for t in tests_failed:
-      print("  " + t)
-  print("Ran " + PPSSPP_EXE)
+    print("Ran " + PPSSPP_EXE)
 
 
 def main():
@@ -387,6 +326,7 @@ def main():
   for arg in sys.argv[1:]:
     if arg == '--teamcity':
       teamcity_mode = True
+      args.append(arg)
     elif arg[0] == '-':
       args.append(arg)
     else:

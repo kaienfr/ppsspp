@@ -148,8 +148,6 @@ if(NOT MSVC)
 	add_definitions(-fno-strict-aliasing)
 	if (CMAKE_C_COMPILER_ID STREQUAL "Intel")
 		set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -parallel -fopenmp")
-	else()
-		add_definitions(-ffast-math)
 	endif()
 	if(NOT APPLE)
 		if (NOT CMAKE_C_COMPILER_ID STREQUAL "Intel")
@@ -765,6 +763,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/Debugger/SymbolMap.h
 	Core/Dialog/PSPDialog.cpp
 	Core/Dialog/PSPDialog.h
+	Core/Dialog/PSPGamedataInstallDialog.cpp
+	Core/Dialog/PSPGamedataInstallDialog.h
 	Core/Dialog/PSPMsgDialog.cpp
 	Core/Dialog/PSPMsgDialog.h
 	Core/Dialog/PSPOskDialog.cpp
@@ -803,6 +803,7 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/HLE/HLE.h
 	Core/HLE/HLETables.cpp
 	Core/HLE/HLETables.h
+	Core/HLE/KernelWaitHelpers.h
 	Core/HLE/__sceAudio.cpp
 	Core/HLE/__sceAudio.h
 	Core/HLE/sceAtrac.cpp
@@ -829,6 +830,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/HLE/sceGe.h
 	Core/HLE/sceFont.cpp
 	Core/HLE/sceFont.h
+	Core/HLE/sceHeap.cpp
+	Core/HLE/sceHeap.h
 	Core/HLE/sceHprm.cpp
 	Core/HLE/sceHprm.h
 	Core/HLE/sceHttp.cpp
@@ -869,6 +872,8 @@ add_library(${CoreLibName} ${CoreLinkType}
 	Core/HLE/sceMpeg.h
 	Core/HLE/sceNet.cpp
 	Core/HLE/sceNet.h
+	Core/HLE/sceNetAdhoc.cpp
+	Core/HLE/sceNetAdhoc.h
 	Core/HLE/sceOpenPSID.cpp
 	Core/HLE/sceOpenPSID.h
 	Core/HLE/sceP3da.cpp
@@ -993,14 +998,18 @@ set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/git-version.cpp
 add_dependencies(${CoreLibName} GitVersion)
 
 add_library(GPU OBJECT
+	GPU/Common/VertexDecoderCommon.cpp
+	GPU/Common/VertexDecoderCommon.h
+	GPU/Common/IndexGenerator.cpp
+	GPU/Common/IndexGenerator.h
+	GPU/Common/TextureDecoder.cpp
+	GPU/Common/TextureDecoder.h
 	GPU/GLES/GLES_GPU.cpp
 	GPU/GLES/GLES_GPU.h
 	GPU/GLES/FragmentShaderGenerator.cpp
 	GPU/GLES/FragmentShaderGenerator.h
 	GPU/GLES/Framebuffer.cpp
 	GPU/GLES/Framebuffer.h
-	GPU/GLES/IndexGenerator.cpp
-	GPU/GLES/IndexGenerator.h
 	GPU/GLES/ShaderManager.cpp
 	GPU/GLES/ShaderManager.h
 	GPU/GLES/Spline.cpp
@@ -1128,6 +1137,7 @@ endif()
 
 set(NativeAppSource
 	UI/NativeApp.cpp
+	UI/DevScreens.cpp
 	UI/EmuScreen.cpp
 	android/jni/TestRunner.cpp
 	UI/GameInfoCache.cpp

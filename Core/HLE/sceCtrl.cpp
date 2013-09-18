@@ -39,8 +39,7 @@ const int PSP_CTRL_ERROR_INVALID_IDLE_PTR = 0x80000023;
 
 const u32 NUM_CTRL_BUFFERS = 64;
 
-enum
-{
+enum {
 	CTRL_WAIT_POSITIVE = 1,
 	CTRL_WAIT_NEGATIVE = 2,
 };
@@ -285,7 +284,7 @@ void __CtrlVblank()
 void __CtrlTimerUpdate(u64 userdata, int cyclesLate)
 {
 	// This only runs in timer mode (ctrlCycle > 0.)
-	_dbg_assert_msg_(HLE, ctrlCycle > 0, "Ctrl: sampling cycle should be > 0");
+	_dbg_assert_msg_(SCECTRL, ctrlCycle > 0, "Ctrl: sampling cycle should be > 0");
 
 	__CtrlDoSample();
 	CoreTiming::ScheduleEvent(usToCycles(ctrlCycle), ctrlTimer, 0);
@@ -313,6 +312,7 @@ void __CtrlInit()
 
 	memset(&ctrlCurrent, 0, sizeof(ctrlCurrent));
 	memset(ctrlCurrent.analog, CTRL_ANALOG_CENTER, sizeof(ctrlCurrent.analog));
+	analogEnabled = false;
 
 	for (u32 i = 0; i < NUM_CTRL_BUFFERS; i++)
 		memcpy(&ctrlBufs[i], &ctrlCurrent, sizeof(_ctrl_data));
@@ -321,6 +321,10 @@ void __CtrlInit()
 void __CtrlDoState(PointerWrap &p)
 {
 	std::lock_guard<std::recursive_mutex> guard(ctrlMutex);
+	
+	auto s = p.Section("sceCtrl", 1);
+	if (!s)
+		return;
 
 	p.Do(analogEnabled);
 	p.Do(ctrlLatchBufs);
@@ -342,7 +346,6 @@ void __CtrlDoState(PointerWrap &p)
 
 	p.Do(ctrlTimer);
 	CoreTiming::RestoreRegisterEvent(ctrlTimer, "CtrlSampleTimer", __CtrlTimerUpdate);
-	p.DoMarker("sceCtrl");
 }
 
 void __CtrlShutdown()
@@ -352,11 +355,11 @@ void __CtrlShutdown()
 
 u32 sceCtrlSetSamplingCycle(u32 cycle)
 {
-	DEBUG_LOG(HLE, "sceCtrlSetSamplingCycle(%u)", cycle);
+	DEBUG_LOG(SCECTRL, "sceCtrlSetSamplingCycle(%u)", cycle);
 
 	if ((cycle > 0 && cycle < 5555) || cycle > 20000)
 	{
-		WARN_LOG(HLE, "SCE_KERNEL_ERROR_INVALID_VALUE=sceCtrlSetSamplingCycle(%u)", cycle);
+		WARN_LOG(SCECTRL, "SCE_KERNEL_ERROR_INVALID_VALUE=sceCtrlSetSamplingCycle(%u)", cycle);
 		return SCE_KERNEL_ERROR_INVALID_VALUE;
 	}
 
@@ -373,7 +376,7 @@ u32 sceCtrlSetSamplingCycle(u32 cycle)
 
 int sceCtrlGetSamplingCycle(u32 cyclePtr)
 {
-	DEBUG_LOG(HLE, "sceCtrlSetSamplingCycle(%08x)", cyclePtr);
+	DEBUG_LOG(SCECTRL, "sceCtrlSetSamplingCycle(%08x)", cyclePtr);
 	if (Memory::IsValidAddress(cyclePtr))
 		Memory::Write_U32(ctrlCycle, cyclePtr);
 	return 0;
@@ -383,7 +386,7 @@ u32 sceCtrlSetSamplingMode(u32 mode)
 {
 	u32 retVal = 0;
 
-	DEBUG_LOG(HLE, "sceCtrlSetSamplingMode(%i)", mode);
+	DEBUG_LOG(SCECTRL, "sceCtrlSetSamplingMode(%i)", mode);
 	if (mode > 1)
 		return SCE_KERNEL_ERROR_INVALID_MODE;
 
@@ -395,7 +398,7 @@ u32 sceCtrlSetSamplingMode(u32 mode)
 int sceCtrlGetSamplingMode(u32 modePtr)
 {
 	u32 retVal = analogEnabled == true ? CTRL_MODE_ANALOG : CTRL_MODE_DIGITAL;
-	DEBUG_LOG(HLE, "%d=sceCtrlGetSamplingMode(%08x)", retVal, modePtr);
+	DEBUG_LOG(SCECTRL, "%d=sceCtrlGetSamplingMode(%08x)", retVal, modePtr);
 
 	if (Memory::IsValidAddress(modePtr))
 		Memory::Write_U32(retVal, modePtr);
@@ -405,7 +408,7 @@ int sceCtrlGetSamplingMode(u32 modePtr)
 
 int sceCtrlSetIdleCancelThreshold(int idleReset, int idleBack)
 {
-	DEBUG_LOG(HLE, "FAKE sceCtrlSetIdleCancelThreshold(%d, %d)", idleReset, idleBack);
+	DEBUG_LOG(SCECTRL, "FAKE sceCtrlSetIdleCancelThreshold(%d, %d)", idleReset, idleBack);
 
 	if (idleReset < -1 || idleBack < -1 || idleReset > 128 || idleBack > 128)
 		return SCE_KERNEL_ERROR_INVALID_VALUE;
@@ -417,7 +420,7 @@ int sceCtrlSetIdleCancelThreshold(int idleReset, int idleBack)
 
 int sceCtrlGetIdleCancelThreshold(u32 idleResetPtr, u32 idleBackPtr)
 {
-	DEBUG_LOG(HLE, "sceCtrlSetIdleCancelThreshold(%08x, %08x)", idleResetPtr, idleBackPtr);
+	DEBUG_LOG(SCECTRL, "sceCtrlSetIdleCancelThreshold(%08x, %08x)", idleResetPtr, idleBackPtr);
 
 	if (idleResetPtr && !Memory::IsValidAddress(idleResetPtr))
 		return PSP_CTRL_ERROR_INVALID_IDLE_PTR;
@@ -438,13 +441,13 @@ void sceCtrlReadBufferPositive(u32 ctrlDataPtr, u32 nBufs)
 	if (done != 0)
 	{
 		RETURN(done);
-		DEBUG_LOG(HLE, "%d=sceCtrlReadBufferPositive(%08x, %i)", done, ctrlDataPtr, nBufs);
+		DEBUG_LOG(SCECTRL, "%d=sceCtrlReadBufferPositive(%08x, %i)", done, ctrlDataPtr, nBufs);
 	}
 	else
 	{
 		waitingThreads.push_back(__KernelGetCurThread());
 		__KernelWaitCurThread(WAITTYPE_CTRL, CTRL_WAIT_POSITIVE, ctrlDataPtr, 0, false, "ctrl buffer waited");
-		DEBUG_LOG(HLE, "sceCtrlReadBufferPositive(%08x, %i) - waiting", ctrlDataPtr, nBufs);
+		DEBUG_LOG(SCECTRL, "sceCtrlReadBufferPositive(%08x, %i) - waiting", ctrlDataPtr, nBufs);
 	}
 }
 
@@ -454,33 +457,33 @@ void sceCtrlReadBufferNegative(u32 ctrlDataPtr, u32 nBufs)
 	if (done != 0)
 	{
 		RETURN(done);
-		DEBUG_LOG(HLE, "%d=sceCtrlReadBufferNegative(%08x, %i)", done, ctrlDataPtr, nBufs);
+		DEBUG_LOG(SCECTRL, "%d=sceCtrlReadBufferNegative(%08x, %i)", done, ctrlDataPtr, nBufs);
 	}
 	else
 	{
 		waitingThreads.push_back(__KernelGetCurThread());
 		__KernelWaitCurThread(WAITTYPE_CTRL, CTRL_WAIT_NEGATIVE, ctrlDataPtr, 0, false, "ctrl buffer waited");
-		DEBUG_LOG(HLE, "sceCtrlReadBufferNegative(%08x, %i) - waiting", ctrlDataPtr, nBufs);
+		DEBUG_LOG(SCECTRL, "sceCtrlReadBufferNegative(%08x, %i) - waiting", ctrlDataPtr, nBufs);
 	}
 }
 
 int sceCtrlPeekBufferPositive(u32 ctrlDataPtr, u32 nBufs)
 {
 	int done = __CtrlReadBuffer(ctrlDataPtr, nBufs, false, true);
-	DEBUG_LOG(HLE, "%d=sceCtrlPeekBufferPositive(%08x, %i)", done, ctrlDataPtr, nBufs);
+	DEBUG_LOG(SCECTRL, "%d=sceCtrlPeekBufferPositive(%08x, %i)", done, ctrlDataPtr, nBufs);
 	return done;
 }
 
 int sceCtrlPeekBufferNegative(u32 ctrlDataPtr, u32 nBufs)
 {
 	int done = __CtrlReadBuffer(ctrlDataPtr, nBufs, true, true);
-	DEBUG_LOG(HLE, "%d=sceCtrlPeekBufferNegative(%08x, %i)", done, ctrlDataPtr, nBufs);
+	DEBUG_LOG(SCECTRL, "%d=sceCtrlPeekBufferNegative(%08x, %i)", done, ctrlDataPtr, nBufs);
 	return done;
 }
 
 u32 sceCtrlPeekLatch(u32 latchDataPtr)
 {
-	DEBUG_LOG(HLE, "sceCtrlPeekLatch(%08x)", latchDataPtr);
+	DEBUG_LOG(SCECTRL, "sceCtrlPeekLatch(%08x)", latchDataPtr);
 
 	if (Memory::IsValidAddress(latchDataPtr))
 		Memory::WriteStruct(latchDataPtr, &latch);
@@ -490,7 +493,7 @@ u32 sceCtrlPeekLatch(u32 latchDataPtr)
 
 u32 sceCtrlReadLatch(u32 latchDataPtr)
 {
-	DEBUG_LOG(HLE, "sceCtrlReadLatch(%08x)", latchDataPtr);
+	DEBUG_LOG(SCECTRL, "sceCtrlReadLatch(%08x)", latchDataPtr);
 
 	if (Memory::IsValidAddress(latchDataPtr))
 		Memory::WriteStruct(latchDataPtr, &latch);

@@ -33,6 +33,7 @@
 #include "Core/Config.h"
 #include "Core/System.h"
 #include "Core/HLE/sceUtility.h"
+#include "Common/CPUDetect.h"
 
 #include "ui_atlas.h"
 
@@ -96,35 +97,39 @@ void DrawBackground(float alpha) {
 
 std::map<std::string, std::pair<std::string, int>> GetLangValuesMapping() {
 	std::map<std::string, std::pair<std::string, int>> langValuesMapping;
-	langValuesMapping["ja_JP"] = std::make_pair("日本語", PSP_SYSTEMPARAM_LANGUAGE_JAPANESE);
-	langValuesMapping["en_US"] = std::make_pair("English",PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["fr_FR"] = std::make_pair("Français", PSP_SYSTEMPARAM_LANGUAGE_FRENCH);
-	langValuesMapping["es_ES"] = std::make_pair("Castellano (España)", PSP_SYSTEMPARAM_LANGUAGE_SPANISH);
-	langValuesMapping["es_LA"] = std::make_pair("Español (América Latina)", PSP_SYSTEMPARAM_LANGUAGE_SPANISH);
-	langValuesMapping["de_DE"] = std::make_pair("Deutsch", PSP_SYSTEMPARAM_LANGUAGE_GERMAN);
-	langValuesMapping["it_IT"] = std::make_pair("Italiano", PSP_SYSTEMPARAM_LANGUAGE_ITALIAN); 
-	langValuesMapping["nl_NL"] = std::make_pair("Nederlands", PSP_SYSTEMPARAM_LANGUAGE_DUTCH);
-	langValuesMapping["pt_PT"] = std::make_pair("Português", PSP_SYSTEMPARAM_LANGUAGE_PORTUGUESE);
-	langValuesMapping["pt_BR"] = std::make_pair("Português Brasileiro", PSP_SYSTEMPARAM_LANGUAGE_PORTUGUESE);
-	langValuesMapping["ru_RU"] = std::make_pair("Русский", PSP_SYSTEMPARAM_LANGUAGE_RUSSIAN);
-	langValuesMapping["ko_KR"] = std::make_pair("한국어", PSP_SYSTEMPARAM_LANGUAGE_KOREAN);
-	langValuesMapping["zh_TW"] = std::make_pair("繁體中文", PSP_SYSTEMPARAM_LANGUAGE_CHINESE_TRADITIONAL);
-	langValuesMapping["zh_CN"] = std::make_pair("简体中文", PSP_SYSTEMPARAM_LANGUAGE_CHINESE_SIMPLIFIED);
+	IniFile mapping;
+	mapping.LoadFromVFS("langregion.ini");
+	std::vector<std::string> keys;
+	mapping.GetKeys("LangRegionNames", keys);
 
-	//langValuesMapping["ar_AE"] = std::make_pair("العربية", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["az_AZ"] = std::make_pair("Azeri", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["ca_ES"] = std::make_pair("Català", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["gr_EL"] = std::make_pair("ελληνικά", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["he_IL"] = std::make_pair("עברית", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["hu_HU"] = std::make_pair("Magyar", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["id_ID"] = std::make_pair("Indonesia", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["pl_PL"] = std::make_pair("Polski", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["ro_RO"] = std::make_pair("Român", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["sv_SE"] = std::make_pair("Svenska", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["tr_TR"] = std::make_pair("Türk", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["uk_UA"] = std::make_pair("Українська", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["vn_VN"] = std::make_pair("Vietnamese", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
-	langValuesMapping["cz_CZ"] = std::make_pair("Česky", PSP_SYSTEMPARAM_LANGUAGE_ENGLISH);
+
+	std::map<std::string, int> langCodeMapping;
+	langCodeMapping["JAPANESE"] = PSP_SYSTEMPARAM_LANGUAGE_JAPANESE;
+	langCodeMapping["ENGLISH"] = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
+	langCodeMapping["FRENCH"] = PSP_SYSTEMPARAM_LANGUAGE_FRENCH;
+	langCodeMapping["SPANISH"] = PSP_SYSTEMPARAM_LANGUAGE_SPANISH;
+	langCodeMapping["GERMAN"] = PSP_SYSTEMPARAM_LANGUAGE_GERMAN;
+	langCodeMapping["ITALIAN"] = PSP_SYSTEMPARAM_LANGUAGE_ITALIAN;
+	langCodeMapping["DUTCH"] = PSP_SYSTEMPARAM_LANGUAGE_DUTCH;
+	langCodeMapping["PORTUGUESE"] = PSP_SYSTEMPARAM_LANGUAGE_PORTUGUESE;
+	langCodeMapping["RUSSIAN"] = PSP_SYSTEMPARAM_LANGUAGE_RUSSIAN;
+	langCodeMapping["KOREAN"] = PSP_SYSTEMPARAM_LANGUAGE_KOREAN;
+	langCodeMapping["CHINESE_TRADITIONAL"] = PSP_SYSTEMPARAM_LANGUAGE_CHINESE_TRADITIONAL;
+	langCodeMapping["CHINESE_SIMPLIFIED"] = PSP_SYSTEMPARAM_LANGUAGE_CHINESE_SIMPLIFIED;
+
+	IniFile::Section *langRegionNames = mapping.GetOrCreateSection("LangRegionNames");
+	IniFile::Section *systemLanguage = mapping.GetOrCreateSection("SystemLanguage");
+
+	for (size_t i = 0; i < keys.size(); i++) {
+		std::string langName;
+		langRegionNames->Get(keys[i].c_str(), &langName, "ERROR");
+		std::string langCode;
+		systemLanguage->Get(keys[i].c_str(), &langCode, "ENGLISH");
+		int iLangCode = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
+		if (langCodeMapping.find(langCode) != langCodeMapping.end())
+			iLangCode = langCodeMapping[langCode];
+		langValuesMapping[keys[i]] = std::make_pair(langName, iLangCode);
+	}
 	return langValuesMapping;
 }
 
@@ -136,6 +141,13 @@ void UIScreenWithBackground::DrawBackground(UIContext &dc) {
 void UIDialogScreenWithBackground::DrawBackground(UIContext &dc) {
 	::DrawBackground(1.0f);
 	dc.Flush();
+}
+
+PromptScreen::PromptScreen(std::string message, std::string yesButtonText, std::string noButtonText, std::function<void(bool)> callback)
+	: message_(message), callback_(callback) {
+		I18NCategory *d = GetI18NCategory("Dialog");
+		yesButtonText_ = d->T(yesButtonText.c_str());
+		noButtonText_ = d->T(noButtonText.c_str());
 }
 
 void PromptScreen::CreateViews() {
@@ -193,10 +205,13 @@ NewLanguageScreen::NewLanguageScreen(const std::string &title) : ListPopupScreen
 		if (tempLangs[i].name.find("README") != std::string::npos) {
 			continue;
 		}
-		// Skip ar_AE
+		
+#ifndef _WIN32
+		// ar_AE only works on Windows.
 		if (tempLangs[i].name.find("ar_AE") != std::string::npos) {
 			continue;
 		}
+#endif
 		FileInfo lang = tempLangs[i];
 		langs_.push_back(lang);
 
@@ -215,7 +230,7 @@ NewLanguageScreen::NewLanguageScreen(const std::string &title) : ListPopupScreen
 				buttonTitle = langValuesMapping[code].first;
 			}
 		}
-		if (g_Config.languageIni == code)
+		if (g_Config.sLanguageIni == code)
 			selected = counter;
 		listing.push_back(buttonTitle);
 		counter++;
@@ -227,7 +242,7 @@ NewLanguageScreen::NewLanguageScreen(const std::string &title) : ListPopupScreen
 void NewLanguageScreen::OnCompleted(DialogResult result) {
 	if (result != DR_OK)
 		return;
-	std::string oldLang = g_Config.languageIni;
+	std::string oldLang = g_Config.sLanguageIni;
 	
 	std::string iniFile = langs_[listView_->GetSelected()].name;
 
@@ -239,18 +254,19 @@ void NewLanguageScreen::OnCompleted(DialogResult result) {
 	if (code.empty())
 		return;
 
-	g_Config.languageIni = code;
+	g_Config.sLanguageIni = code;
 	
-	if (i18nrepo.LoadIni(g_Config.languageIni)) {
+	if (i18nrepo.LoadIni(g_Config.sLanguageIni)) {
 		// Dunno what else to do here.
 		if (langValuesMapping.find(code) == langValuesMapping.end()) {
 			// Fallback to English
-			g_Config.ilanguage = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
+			g_Config.iLanguage = PSP_SYSTEMPARAM_LANGUAGE_ENGLISH;
 		} else {
-			g_Config.ilanguage = langValuesMapping[code].second;
+			g_Config.iLanguage = langValuesMapping[code].second;
 		}
+		RecreateViews();
 	} else {
-		g_Config.languageIni = oldLang;
+		g_Config.sLanguageIni = oldLang;
 	}
 }
 
@@ -299,9 +315,13 @@ void LogoScreen::render() {
 
 	I18NCategory *c = GetI18NCategory("PSPCredits");
 	char temp[256];
-	sprintf(temp, "%s Henrik Rydgård", c->T("created", "Created by"));
-
-	dc.Draw()->DrawImage(I_LOGO, dp_xres / 2, dp_yres / 2 - 30, 1.5f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+	sprintf(temp, "%s Henrik Rydg\xc3\xa5rd", c->T("created", "Created by"));
+#ifdef GOLD
+	dc.Draw()->DrawImage(I_ICONGOLD, (dp_xres / 2) - 120, (dp_yres / 2) - 30, 1.2f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+#else
+	dc.Draw()->DrawImage(I_ICON, (dp_xres / 2) - 120, (dp_yres / 2) - 30, 1.2f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
+#endif
+	dc.Draw()->DrawImage(I_LOGO, (dp_xres / 2) + 40, dp_yres / 2 - 30, 1.5f, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
 	//dc.Draw()->DrawTextShadow(UBUNTU48, "PPSSPP", dp_xres / 2, dp_yres / 2 - 30, colorAlpha(0xFFFFFFFF, alphaText), ALIGN_CENTER);
 	dc.Draw()->SetFontScale(1.0f, 1.0f);
 	dc.SetFontStyle(dc.theme->uiFont);
@@ -316,53 +336,17 @@ void LogoScreen::render() {
 	dc.Flush();
 }
 
-void SystemInfoScreen::CreateViews() {
-	// NOTE: Do not translate this section. It will change a lot and will be impossible to keep up.
-	I18NCategory *g = GetI18NCategory("General");
-
-	using namespace UI;
-	root_ = new ScrollView(ORIENT_VERTICAL, new LayoutParams(FILL_PARENT, FILL_PARENT));
-	
-	LinearLayout *scroll = new LinearLayout(ORIENT_VERTICAL, new LayoutParams(FILL_PARENT, WRAP_CONTENT));
-	root_->Add(scroll);
-
-	scroll->Add(new ItemHeader("System Information"));
-	scroll->Add(new InfoItem("System Name", System_GetName()));
-	scroll->Add(new InfoItem("GPU Vendor", (char *)glGetString(GL_VENDOR)));
-	scroll->Add(new InfoItem("GPU Model", (char *)glGetString(GL_RENDERER)));
-	scroll->Add(new InfoItem("OpenGL Version Supported", (char *)glGetString(GL_VERSION)));
-	scroll->Add(new Choice(g->T("Back")))->OnClick.Handle<UIScreen>(this, &UIScreen::OnBack);
-	
-#ifdef _WIN32
-	scroll->Add(new ItemHeader("OpenGL Extensions"));
-#else
-	scroll->Add(new ItemHeader("OpenGL ES 2.0 Extensions"));
-#endif
-	std::vector<std::string> exts;
-	SplitString(g_all_gl_extensions, ' ', exts);
-	for (size_t i = 0; i < exts.size(); i++) {
-		scroll->Add(new TextView(exts[i]));
-	}
-
-	scroll->Add(new ItemHeader("EGL Extensions"));
-	exts.clear();
-	SplitString(g_all_egl_extensions, ' ', exts);
-	for (size_t i = 0; i < exts.size(); i++) {
-		scroll->Add(new TextView(exts[i]));
-	}
-}
-
 void CreditsScreen::CreateViews() {
 	using namespace UI;
-	I18NCategory *g = GetI18NCategory("General");
+	I18NCategory *d = GetI18NCategory("Dialog");
 	I18NCategory *c = GetI18NCategory("PSPCredits");
 
 	root_ = new AnchorLayout(new LayoutParams(FILL_PARENT, FILL_PARENT));
-	root_->Add(new Button(g->T("Back"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 10, false)))->OnClick.Handle(this, &CreditsScreen::OnOK);
+	root_->Add(new Button(d->T("Back"), new AnchorLayoutParams(260, 64, NONE, NONE, 10, 10, false)))->OnClick.Handle(this, &CreditsScreen::OnOK);
 #ifndef GOLD
 	root_->Add(new Button(c->T("Buy Gold"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 10, false)))->OnClick.Handle(this, &CreditsScreen::OnSupport);
 #endif
-	if(g_Config.languageIni == "zh_CN" ||g_Config.languageIni == "zh_TW") {
+	if(g_Config.sLanguageIni == "zh_CN" ||g_Config.sLanguageIni == "zh_TW") {
 	  root_->Add(new Button(c->T("PPSSPP Chinese Forum"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 84, false)))->OnClick.Handle(this, &CreditsScreen::OnChineseForum);
 	  root_->Add(new Button(c->T("PPSSPP Forums"), new AnchorLayoutParams(260, 64, 10, NONE, NONE, 154, false)))->OnClick.Handle(this, &CreditsScreen::OnForums);
 	  root_->Add(new Button("www.ppsspp.org", new AnchorLayoutParams(260, 64, 10, NONE, NONE, 228, false)))->OnClick.Handle(this, &CreditsScreen::OnPPSSPPOrg);
@@ -409,7 +393,7 @@ UI::EventReturn CreditsScreen::OnOK(UI::EventParams &e) {
 
 void CreditsScreen::update(InputState &input_state) {
 	UIScreen::update(input_state);
-	globalUIState = UISTATE_MENU;
+	UpdateUIState(UISTATE_MENU);
 	if (input_state.pad_buttons_down & PAD_BUTTON_BACK) {
 		screenManager()->finishDialog(this, DR_OK);
 	}
@@ -428,7 +412,7 @@ void CreditsScreen::render() {
 		"",
 		"",
 		c->T("created", "Created by"),
-		"Henrik Rydgård",
+		"Henrik Rydg\xc3\xa5rd",
 		"(aka hrydgard, ector)",
 		"",
 		"",
@@ -462,6 +446,8 @@ void CreditsScreen::render() {
 		"arnastia",
 		"lioncash",
 		"JulianoAmaralChaves",
+		"vnctdj",
+		"kaienfr",
 		"",
 		"",
 		c->T("specialthanks", "Special thanks to:"),
@@ -472,6 +458,12 @@ void CreditsScreen::render() {
 		"all the forum mods",
 		"",
 		c->T("this translation by", ""),   // Empty string as this is the original :)
+		c->T("translators1", ""),
+		c->T("translators2", ""),
+		c->T("translators3", ""),
+		c->T("translators4", ""),
+		c->T("translators5", ""),
+		c->T("translators6", ""),
 		"",
 		c->T("written", "Written in C++ for speed and portability"),
 		"",
@@ -527,29 +519,30 @@ void CreditsScreen::render() {
 	for (int i = 0; i < numItems; i++) {
 		float alpha = linearInOut(y+32, 64, dp_yres - 192, 64);
 		if (alpha > 0.0f) {
-			dc.Draw()->SetFontScale(ease(alpha), ease(alpha));
-			dc.Draw()->DrawText(UBUNTU24, credits[i], dp_xres/2, y, whiteAlpha(alpha), ALIGN_HCENTER);
-			dc.Draw()->SetFontScale(1.0f, 1.0f);
+			dc.SetFontScale(ease(alpha), ease(alpha));
+			dc.DrawText(credits[i], dp_xres/2, y, whiteAlpha(alpha), ALIGN_HCENTER);
+			dc.SetFontScale(1.0f, 1.0f);
 		}
 		y += itemHeight;
 	}
 
 	/*
-	I18NCategory *g = GetI18NCategory("General");
+	I18NCategory *c = GetI18NCategory("PSPCredits");
+	I18NCategory *d = GetI18NCategory("Dialog");
 
-	if (UIButton(GEN_ID, Pos(dp_xres - 10, dp_yres - 10), 200, 0, g->T("Back"), ALIGN_BOTTOMRIGHT)) {
+	if (UIButton(GEN_ID, Pos(dp_xres - 10, dp_yres - 10), 200, 0, d->T("Back"), ALIGN_BOTTOMRIGHT)) {
 		screenManager()->finishDialog(this, DR_OK);
 	}
 
 #ifdef ANDROID
 #ifndef GOLD
-	if (UIButton(GEN_ID, Pos(10, dp_yres - 10), 300, 0, g->T("Buy PPSSPP Gold"), ALIGN_BOTTOMLEFT)) {
+	if (UIButton(GEN_ID, Pos(10, dp_yres - 10), 300, 0, c->T("Buy PPSSPP Gold"), ALIGN_BOTTOMLEFT)) {
 		LaunchBrowser("market://details?id=org.ppsspp.ppssppgold");
 	}
 #endif
 #else
 #ifndef GOLD
-	if (UIButton(GEN_ID, Pos(10, dp_yres - 10), 300, 0, g->T("Buy PPSSPP Gold"), ALIGN_BOTTOMLEFT)) {
+	if (UIButton(GEN_ID, Pos(10, dp_yres - 10), 300, 0, c->T("Buy PPSSPP Gold"), ALIGN_BOTTOMLEFT)) {
 		LaunchBrowser("http://central.ppsspp.org/buygold");
 	}
 #endif

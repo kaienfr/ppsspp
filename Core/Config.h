@@ -57,7 +57,7 @@ public:
 	bool bAutoSaveSymbolMap;
 	std::string sReportHost;
 	std::vector<std::string> recentIsos;
-	std::string languageIni;
+	std::string sLanguageIni;
 
 	// GFX
 	bool bSoftwareRendering;
@@ -70,16 +70,16 @@ public:
 	bool bStretchToDisplay;
 	bool bVSync;
 	int iFrameSkip;
+	bool bFrameSkipUnthrottle;
 
 	int iWindowX;
 	int iWindowY;
-	int iWindowZoom;  // for Windows
-	bool bAntiAliasing; 
+	int iWindowWidth;  // Windows and other windowed environments
+	int iWindowHeight;
+
 	bool bVertexCache;
 	bool bFullScreen;
-#ifdef _WIN32
-	bool bFullScreenOnLaunch;
-#endif
+	int iInternalResolution;  // 0 = Auto (native), 1 = 1x (480x272), 2 = 2x, 3 = 3x, 4 = 4x and so on.
 	int iAnisotropyLevel;  // 0 - 5, powers of 2: 0 = 1x = no aniso
 	bool bTrueColor;
 	bool bMipMap;
@@ -92,6 +92,8 @@ public:
 	int iCurrentStateSlot;
 	bool bEnableCheats;
 	bool bReloadCheats;
+	bool bDisableStencilTest;
+	bool bAlwaysDepthWrite;
 
 	// Sound
 	bool bEnableSound;
@@ -107,6 +109,7 @@ public:
 	int iShowFPSCounter;
 	bool bShowDebugStats;
 	bool bAccelerometerToAnalogHoriz;
+	int iTiltSensitivity;
 
 	// The three tabs.
 	bool bGridView1;
@@ -132,7 +135,7 @@ public:
 
 	// SystemParam
 	std::string sNickName;
-	int ilanguage;
+	int iLanguage;
 	int iTimeFormat;
 	int iDateFormat;
 	int iTimeZone;
@@ -157,6 +160,7 @@ public:
 	int iFontWidth;
 	int iFontHeight;
 	bool bDisplayStatusBar;
+	bool bShowDeveloperMenu;
 
 	std::string currentDirectory;
 	std::string externalDirectory; 

@@ -233,7 +233,7 @@ struct GPUgstate
 	u32 getFixA() const { return blendfixa & 0xFFFFFF; }
 	u32 getFixB() const { return blendfixb & 0xFFFFFF; }
 	GEBlendDstFactor getBlendFuncB() const { return (GEBlendDstFactor)((blend >> 4) & 0xF); }
-	int getBlendEq()    const { return (blend >> 8) & 0x7; }
+	GEBlendMode getBlendEq() const { return static_cast<GEBlendMode>((blend >> 8) & 0x7); }
 	bool isAlphaBlendEnabled() const { return alphaBlendEnable & 1; }
 
 	// AntiAlias
@@ -250,7 +250,7 @@ struct GPUgstate
 	// Depth Test
 	bool isDepthTestEnabled() const { return zTestEnable & 1; }
 	bool isDepthWriteEnabled() const { return !(zmsk & 1); }
-	int getDepthTestFunc() const { return ztestfunc & 0x7; }
+	GEComparison getDepthTestFunction() const { return static_cast<GEComparison>(ztestfunc & 0x7); }
 	u16 getDepthRangeMin() const { return minz & 0xFFFF; }
 	u16 getDepthRangeMax() const { return maxz & 0xFFFF; }
 	
@@ -276,8 +276,11 @@ struct GPUgstate
 	u32 getColorTestMask() const { return colormask & 0xFFFFFF; }
 
 	// Texturing
+	// TODO: Verify getTextureAddress() alignment?
+	u32 getTextureAddress(int level) const { return (texaddr[level] & 0xFFFFF0) | ((texbufwidth[level] << 8) & 0x0F000000); }
 	int getTextureWidth(int level) const { return 1 << (texsize[level] & 0xf);}
 	int getTextureHeight(int level) const { return 1 << ((texsize[level] >> 8) & 0xf);}
+	u16 getTextureDimension(int level) const { return  texsize[level] & 0xf0f;}
 	bool isTextureMapEnabled() const { return textureMapEnable & 1; }
 	GETexFunc getTextureFunction() const { return static_cast<GETexFunc>(texfunc & 0x7); }
 	bool isColorDoublingEnabled() const { return (texfunc & 0x10000) != 0; }
@@ -308,6 +311,7 @@ struct GPUgstate
 	bool isDirectionalLight(int chan) const { return getLightType(chan) == GE_LIGHTTYPE_DIRECTIONAL; }
 	bool isPointLight(int chan) const { return getLightType(chan) == GE_LIGHTTYPE_POINT; }
 	bool isSpotLight(int chan) const { return getLightType(chan) == GE_LIGHTTYPE_SPOT; }
+	GEShadeMode getShadeMode() const { return static_cast<GEShadeMode>(shademodel & 1); }
 	unsigned int getAmbientR() const { return ambientcolor&0xFF; }
 	unsigned int getAmbientG() const { return (ambientcolor>>8)&0xFF; }
 	unsigned int getAmbientB() const { return (ambientcolor>>16)&0xFF; }
@@ -351,9 +355,15 @@ struct GPUgstate
 	int getRegionX1() const { return region1 & 0x3FF; }
 	int getRegionY1() const { return (region1 >> 10) & 0x3FF; }
 	int getRegionX2() const { return (region2 & 0x3FF); }
-	int getRegionY2() const { return ((region2 >> 10) & 0x3FF); }
-	float getViewportX1() const { return fabsf(getFloat24(viewportx1) * 2.0f); } 
-	float getViewportY1() const { return fabsf(getFloat24(viewporty1) * 2.0f); } 
+	int getRegionY2() const { return (region2 >> 10) & 0x3FF; }
+	float getViewportX1() const { return fabsf(getFloat24(viewportx1) * 2.0f); }
+	float getViewportY1() const { return fabsf(getFloat24(viewporty1) * 2.0f); }
+	// Fixed 16 point.
+	int getOffsetX16() const { return offsetx & 0xFFFF; }
+	// Fixed 16 point.
+	int getOffsetY16() const { return offsety & 0xFFFF; }
+	float getOffsetX() const { return (float)getOffsetX16() / 16.0f; }
+	float getOffsetY() const { return (float)getOffsetY16() / 16.0f; }
 
 	// Vertex type
 	bool isModeThrough() const { return (vertType & GE_VTYPE_THROUGH) != 0; }
@@ -411,7 +421,6 @@ struct GPUStateCache
 	UVScale uv;
 	bool flipTexture;
 
-	float zMin, zMax;
 	float lightpos[4][3];
 	float lightdir[4][3];
 	float lightatt[4][3];
@@ -490,7 +499,7 @@ struct GPUStatistics {
 	int numFBOs;
 };
 
-void GPU_Init();
+bool GPU_Init();
 void GPU_Shutdown();
 
 void InitGfxState();
@@ -505,6 +514,6 @@ extern GPUInterface *gpu;
 extern GPUStatistics gpuStats;
 
 inline u32 GPUStateCache::getRelativeAddress(u32 data) const {
-	u32 baseExtended = ((gstate.base & 0x0F0000) << 8) | data;
+	u32 baseExtended = ((gstate.base & 0x000F0000) << 8) | data;
 	return (gstate_c.offsetAddr + baseExtended) & 0x0FFFFFFF;
 }

@@ -42,11 +42,11 @@ public:
 	UI::EventReturn OnEnableAll(UI::EventParams &params);
 protected:
 	virtual void CreateViews();
+	virtual void sendMessage(const char *message, const char *value);
 
 private:
 	UI::EventReturn OnCheckBox(UI::EventParams &params);
 	
-	bool enableCheat [128];
 	std::vector<std::string> formattedList;
 	std::vector<int> locations;
 	

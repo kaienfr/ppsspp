@@ -17,10 +17,16 @@
 
 #include "GPU/ge_constants.h"
 #include "GPU/GPUState.h"
+#ifndef _XBOX
 #include "GPU/GLES/ShaderManager.h"
 #include "GPU/GLES/GLES_GPU.h"
+#endif
 #include "GPU/Null/NullGpu.h"
 #include "GPU/Software/SoftGpu.h"
+#if defined(_XBOX) || defined(_WIN32)
+#include "GPU/Directx9/helper/global.h"
+#include "GPU/Directx9/GPU_DX9.h"
+#endif
 #include "Core/CoreParameter.h"
 #include "Core/System.h"
 
@@ -29,20 +35,31 @@ GPUStateCache gstate_c;
 GPUInterface *gpu;
 GPUStatistics gpuStats;
 
-void GPU_Init() {
+bool GPU_Init() {
 	switch (PSP_CoreParameter().gpuCore) {
 	case GPU_NULL:
 		gpu = new NullGPU();
 		break;
 	case GPU_GLES:
+#ifndef _XBOX
 		gpu = new GLES_GPU();
-		break;
-#ifndef __SYMBIAN32__
-	case GPU_SOFTWARE:
-		gpu = new SoftGPU();
-		break;
 #endif
+		break;
+	case GPU_SOFTWARE:
+#if !(defined(__SYMBIAN32__) || defined(_XBOX))
+		gpu = new SoftGPU();
+#endif
+		break;
+	case GPU_DIRECTX9:
+#if defined(_XBOX)
+		gpu = new DIRECTX9_GPU();
+#elif defined(_WIN32)
+		gpu = new DIRECTX9_GPU();
+#endif
+		break;
 	}
+
+	return gpu != NULL;
 }
 
 void GPU_Shutdown() {

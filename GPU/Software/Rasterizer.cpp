@@ -15,14 +15,19 @@
 // Official git repository and contact information can be found at
 // https://github.com/hrydgard/ppsspp and http://www.ppsspp.org/.
 
-#include "../../Core/MemMap.h"
-#include "../GPUState.h"
+#include "Core/MemMap.h"
+#include "Core/Reporting.h"
+#include "GPU/GPUState.h"
 
-#include "Rasterizer.h"
-#include "Colors.h"
+#include "GPU/Common/TextureDecoder.h"
+#include "GPU/Software/SoftGpu.h"
+#include "GPU/Software/Rasterizer.h"
+#include "GPU/Software/Colors.h"
 
-extern u8* fb;
-extern u8* depthbuf;
+#include <algorithm>
+
+extern FormatBuffer fb;
+extern FormatBuffer depthbuf;
 
 extern u32 clut[4096];
 
@@ -85,7 +90,7 @@ static inline u32 LookupColor(unsigned int index, unsigned int level)
 		return DecodeRGBA8888(clut[index + clutSharingOffset]);
 
 	default:
-		ERROR_LOG(G3D, "Unsupported palette format: %x", gstate.getClutPaletteFormat());
+		ERROR_LOG_REPORT(G3D, "Software: Unsupported palette format: %x", gstate.getClutPaletteFormat());
 		return 0;
 	}
 }
@@ -103,19 +108,22 @@ static inline void GetTexelCoordinates(int level, float s, float t, unsigned int
 		if (s > 1.0) s = 1.0;
 		if (s < 0) s = 0;
 	} else {
-		// TODO: Does this work for negative coords?
-		s = fmod(s, 1.0f);
+		// Subtracting floor works for negative and positive to discard the non-fractional part.
+		s -= floor(s);
 	}
 	if (gstate.isTexCoordClampedT()) {
 		if (t > 1.0) t = 1.0;
 		if (t < 0.0) t = 0.0;
 	} else {
-		// TODO: Does this work for negative coords?
-		t = fmod(t, 1.0f);
+		// Subtracting floor works for negative and positive to discard the non-fractional part.
+		t -= floor(t);
 	}
 
 	int width = 1 << (gstate.texsize[level] & 0xf);
 	int height = 1 << ((gstate.texsize[level]>>8) & 0xf);
+
+	// TODO: These should really be multiplied by 256 to get fixed point coordinates
+	// so we can do texture filtering later.
 
 	u = (unsigned int)(s * width); // TODO: width-1 instead?
 	v = (unsigned int)(t * height); // TODO: width-1 instead?
@@ -145,7 +153,7 @@ static inline void GetTextureCoordinates(const VertexData& v0, const VertexData&
 			if (gstate.getUVProjMode() == GE_PROJMAP_POSITION) {
 			source = ((v0.modelpos * w0 + v1.modelpos * w1 + v2.modelpos * w2) / (w0+w1+w2));
 			} else {
-			ERROR_LOG(G3D, "Unsupported UV projection mode %x", gstate.getUVProjMode());
+			ERROR_LOG_REPORT(G3D, "Software: Unsupported UV projection mode %x", gstate.getUVProjMode());
 			}
 
 			Mat3x3<float> tgen(gstate.tgenMatrix);
@@ -155,65 +163,60 @@ static inline void GetTextureCoordinates(const VertexData& v0, const VertexData&
 		}
 		break;
 	default:
-		ERROR_LOG(G3D, "Unsupported texture mapping mode %x!", gstate.getUVGenMode());
+		ERROR_LOG_REPORT(G3D, "Software: Unsupported texture mapping mode %x!", gstate.getUVGenMode());
 		break;
 	}	
 }
 
-static inline u32 SampleNearest(int level, unsigned int u, unsigned int v)
+static inline u32 SampleNearest(int level, unsigned int u, unsigned int v, u8 *srcptr, int texbufwidthbits)
 {
 	GETextureFormat texfmt = gstate.getTextureFormat();
-	u32 texaddr = (gstate.texaddr[level] & 0xFFFFF0) | ((gstate.texbufwidth[level] << 8) & 0x0F000000);
-	u8* srcptr = (u8*)Memory::GetPointer(texaddr); // TODO: not sure if this is the right place to load from...?
-
-	// Special rules for kernel textures (PPGe), TODO: Verify!
-	int texbufwidth = (texaddr < PSP_GetUserMemoryBase()) ? gstate.texbufwidth[level] & 0x1FFF : gstate.texbufwidth[level] & 0x7FF;
 
 	// TODO: Should probably check if textures are aligned properly...
 
 	switch (texfmt) {
 	case GE_TFMT_4444:
-		srcptr += GetPixelDataOffset(16, texbufwidth*8, u, v);
+		srcptr += GetPixelDataOffset(16, texbufwidthbits, u, v);
 		return DecodeRGBA4444(*(u16*)srcptr);
 	
 	case GE_TFMT_5551:
-		srcptr += GetPixelDataOffset(16, texbufwidth*8, u, v);
+		srcptr += GetPixelDataOffset(16, texbufwidthbits, u, v);
 		return DecodeRGBA5551(*(u16*)srcptr);
 
 	case GE_TFMT_5650:
-		srcptr += GetPixelDataOffset(16, texbufwidth*8, u, v);
+		srcptr += GetPixelDataOffset(16, texbufwidthbits, u, v);
 		return DecodeRGB565(*(u16*)srcptr);
 
 	case GE_TFMT_8888:
-		srcptr += GetPixelDataOffset(32, texbufwidth*8, u, v);
+		srcptr += GetPixelDataOffset(32, texbufwidthbits, u, v);
 		return DecodeRGBA8888(*(u32*)srcptr);
 
 	case GE_TFMT_CLUT32:
 		{
-			srcptr += GetPixelDataOffset(32, texbufwidth*8, u, v);
+			srcptr += GetPixelDataOffset(32, texbufwidthbits, u, v);
 			u32 val = srcptr[0] + (srcptr[1] << 8) + (srcptr[2] << 16) + (srcptr[3] << 24);
 			return LookupColor(gstate.transformClutIndex(val), level);
 		}
 	case GE_TFMT_CLUT16:
 		{
-			srcptr += GetPixelDataOffset(16, texbufwidth*8, u, v);
+			srcptr += GetPixelDataOffset(16, texbufwidthbits, u, v);
 			u16 val = srcptr[0] + (srcptr[1] << 8);
 			return LookupColor(gstate.transformClutIndex(val), level);
 		}
 	case GE_TFMT_CLUT8:
 		{
-			srcptr += GetPixelDataOffset(8, texbufwidth*8, u, v);
+			srcptr += GetPixelDataOffset(8, texbufwidthbits, u, v);
 			u8 val = *srcptr;
 			return LookupColor(gstate.transformClutIndex(val), level);
 		}
 	case GE_TFMT_CLUT4:
 		{
-			srcptr += GetPixelDataOffset(4, texbufwidth*8, u, v);
+			srcptr += GetPixelDataOffset(4, texbufwidthbits, u, v);
 			u8 val = (u & 1) ? (srcptr[0] >> 4) : (srcptr[0] & 0xF);
 			return LookupColor(gstate.transformClutIndex(val), level);
 		}
 	default:
-		ERROR_LOG(G3D, "Unsupported texture format: %x", texfmt);
+		ERROR_LOG_REPORT(G3D, "Software: Unsupported texture format: %x", texfmt);
 		return 0;
 	}
 }
@@ -223,16 +226,19 @@ static inline u32 GetPixelColor(int x, int y)
 {
 	switch (gstate.FrameBufFormat()) {
 	case GE_FORMAT_565:
-		return DecodeRGB565(*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()]);
+		return DecodeRGB565(fb.Get16(x, y, gstate.FrameBufStride()));
 
 	case GE_FORMAT_5551:
-		return DecodeRGBA5551(*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()]);
+		return DecodeRGBA5551(fb.Get16(x, y, gstate.FrameBufStride()));
 
 	case GE_FORMAT_4444:
-		return DecodeRGBA4444(*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()]);
+		return DecodeRGBA4444(fb.Get16(x, y, gstate.FrameBufStride()));
 
 	case GE_FORMAT_8888:
-		return *(u32*)&fb[4*x + 4*y*gstate.FrameBufStride()];
+		return fb.Get32(x, y, gstate.FrameBufStride());
+
+	case GE_FORMAT_INVALID:
+		_dbg_assert_msg_(G3D, false, "Software: invalid framebuf format.");
 	}
 	return 0;
 }
@@ -241,31 +247,34 @@ static inline void SetPixelColor(int x, int y, u32 value)
 {
 	switch (gstate.FrameBufFormat()) {
 	case GE_FORMAT_565:
-		*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()] = RGBA8888To565(value);
+		fb.Set16(x, y, gstate.FrameBufStride(), RGBA8888To565(value));
 		break;
 
 	case GE_FORMAT_5551:
-		*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()] = RGBA8888To5551(value);
+		fb.Set16(x, y, gstate.FrameBufStride(), RGBA8888To5551(value));
 		break;
 
 	case GE_FORMAT_4444:
-		*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()] = RGBA8888To4444(value);
+		fb.Set16(x, y, gstate.FrameBufStride(), RGBA8888To4444(value));
 		break;
 
 	case GE_FORMAT_8888:
-		*(u32*)&fb[4*x + 4*y*gstate.FrameBufStride()] = value;
+		fb.Set32(x, y, gstate.FrameBufStride(), value);
 		break;
+
+	case GE_FORMAT_INVALID:
+		_dbg_assert_msg_(G3D, false, "Software: invalid framebuf format.");
 	}
 }
 
 static inline u16 GetPixelDepth(int x, int y)
 {
-	return *(u16*)&depthbuf[2*x + 2*y*gstate.DepthBufStride()];
+	return depthbuf.Get16(x, y, gstate.DepthBufStride());
 }
 
 static inline void SetPixelDepth(int x, int y, u16 value)
 {
-	*(u16*)&depthbuf[2*x + 2*y*gstate.DepthBufStride()] = value;
+	depthbuf.Set16(x, y, gstate.DepthBufStride(), value);
 }
 
 static inline u8 GetPixelStencil(int x, int y)
@@ -274,9 +283,10 @@ static inline u8 GetPixelStencil(int x, int y)
 		// TODO: Should we return 0xFF instead here?
 		return 0;
 	} else if (gstate.FrameBufFormat() != GE_FORMAT_8888) {
-		return (((*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()]) & 0x8000) != 0) ? 0xFF : 0;
+		return ((fb.Get16(x, y, gstate.FrameBufStride()) & 0x8000) != 0) ? 0xFF : 0;
 	} else {
-		return (((*(u32*)&fb[4*x + 4*y*gstate.FrameBufStride()]) & 0x80000000) != 0) ? 0xFF : 0;
+		// TODO: Not the whole value?
+		return ((fb.Get32(x, y, gstate.FrameBufStride()) & 0x80000000) != 0) ? 0xFF : 0;
 	}
 }
 
@@ -285,9 +295,9 @@ static inline void SetPixelStencil(int x, int y, u8 value)
 	if (gstate.FrameBufFormat() == GE_FORMAT_565) {
 		// Do nothing
 	} else if (gstate.FrameBufFormat() != GE_FORMAT_8888) {
-		*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()] = (*(u16*)&fb[2*x + 2*y*gstate.FrameBufStride()] & ~0x8000) | ((value&0x80)<<8);
+		fb.Set16(x, y, gstate.FrameBufStride(), (fb.Get16(x, y, gstate.FrameBufStride()) & ~0x8000) | ((value&0x80)<<8));
 	} else {
-		*(u32*)&fb[4*x + 4*y*gstate.FrameBufStride()] = (*(u32*)&fb[4*x + 4*y*gstate.FrameBufStride()] & ~0x80000000) | ((value&0x80)<<24);
+		fb.Set32(x, y, gstate.FrameBufStride(), (fb.Get32(x, y, gstate.FrameBufStride()) & ~0x80000000) | ((value&0x80)<<24));
 	}
 }
 
@@ -298,7 +308,7 @@ static inline bool DepthTestPassed(int x, int y, u16 z)
 	if (gstate.isModeClear())
 		return true;
 
-	switch (gstate.getDepthTestFunc()) {
+	switch (gstate.getDepthTestFunction()) {
 	case GE_COMP_NEVER:
 		return false;
 
@@ -407,6 +417,77 @@ static inline void ApplyStencilOp(int op, int x, int y)
 	}
 }
 
+static inline u32 ApplyLogicOp(GELogicOp op, u32 old_color, u32 new_color)
+{
+	switch (op) {
+	case GE_LOGIC_CLEAR:
+		new_color = 0;
+		break;
+
+	case GE_LOGIC_AND:
+		new_color = new_color & old_color;
+		break;
+
+	case GE_LOGIC_AND_REVERSE:
+		new_color = new_color & ~old_color;
+		break;
+
+	case GE_LOGIC_COPY:
+		//new_color = new_color;
+		break;
+
+	case GE_LOGIC_AND_INVERTED:
+		new_color = ~new_color & old_color;
+		break;
+
+	case GE_LOGIC_NOOP:
+		new_color = old_color;
+		break;
+
+	case GE_LOGIC_XOR:
+		new_color = new_color ^ old_color;
+		break;
+
+	case GE_LOGIC_OR:
+		new_color = new_color | old_color;
+		break;
+
+	case GE_LOGIC_NOR:
+		new_color = ~(new_color | old_color);
+		break;
+
+	case GE_LOGIC_EQUIV:
+		new_color = ~(new_color ^ old_color);
+		break;
+
+	case GE_LOGIC_INVERTED:
+		new_color = ~old_color;
+		break;
+
+	case GE_LOGIC_OR_REVERSE:
+		new_color = new_color | ~old_color;
+		break;
+
+	case GE_LOGIC_COPY_INVERTED:
+		new_color = ~new_color;
+		break;
+
+	case GE_LOGIC_OR_INVERTED:
+		new_color = ~new_color | old_color;
+		break;
+
+	case GE_LOGIC_NAND:
+		new_color = ~(new_color & old_color);
+		break;
+
+	case GE_LOGIC_SET:
+		new_color = 0xFFFFFFFF;
+		break;
+	}
+
+	return op;
+}
+
 static inline Vec4<int> GetTextureFunctionOutput(const Vec3<int>& prim_color_rgb, int prim_color_a, const Vec4<int>& texcolor)
 {
 	Vec3<int> out_rgb;
@@ -452,7 +533,9 @@ static inline Vec4<int> GetTextureFunctionOutput(const Vec3<int>& prim_color_rgb
 		break;
 
 	default:
-		ERROR_LOG(G3D, "Unknown texture function %x", gstate.getTextureFunction());
+		ERROR_LOG_REPORT(G3D, "Software: Unknown texture function %x", gstate.getTextureFunction());
+		out_rgb = Vec3<int>::AssignToAll(0);
+		out_a = 0;
 	}
 
 	return Vec4<int>(out_rgb.r(), out_rgb.g(), out_rgb.b(), out_a);
@@ -475,6 +558,10 @@ static inline bool ColorTestPassed(Vec3<int> color)
 
 		case GE_COMP_NOTEQUAL:
 			return c != ref;
+
+		default:
+			ERROR_LOG_REPORT(G3D, "Software: Invalid colortest function: %d", gstate.getColorTestFunction());
+			break;
 	}
 	return true;
 }
@@ -551,7 +638,7 @@ static inline Vec3<int> GetSourceFactor(int source_a, const Vec4<int>& dst)
 		return Vec4<int>::FromRGBA(gstate.getFixA()).rgb();
 
 	default:
-		ERROR_LOG(G3D, "Unknown source factor %x", gstate.getBlendFuncA());
+		ERROR_LOG_REPORT(G3D, "Software: Unknown source factor %x", gstate.getBlendFuncA());
 		return Vec3<int>();
 	}
 }
@@ -593,7 +680,7 @@ static inline Vec3<int> GetDestFactor(const Vec3<int>& source_rgb, int source_a,
 		return Vec4<int>::FromRGBA(gstate.getFixB()).rgb();
 
 	default:
-		ERROR_LOG(G3D, "Unknown dest factor %x", gstate.getBlendFuncB());
+		ERROR_LOG_REPORT(G3D, "Software: Unknown dest factor %x", gstate.getBlendFuncB());
 		return Vec3<int>();
 	}
 }
@@ -629,7 +716,7 @@ static inline Vec3<int> AlphaBlendingResult(const Vec3<int>& source_rgb, int sou
 						::abs(source_rgb.b() - dst.b()));
 
 	default:
-		ERROR_LOG(G3D, "Unknown blend function %x", gstate.getBlendEq());
+		ERROR_LOG_REPORT(G3D, "Software: Unknown blend function %x", gstate.getBlendEq());
 		return Vec3<int>();
 	}
 }
@@ -661,6 +748,17 @@ void DrawTriangle(const VertexData& v0, const VertexData& v1, const VertexData& 
 	int bias1 = IsRightSideOrFlatBottomLine(v1.screenpos.xy(), v2.screenpos.xy(), v0.screenpos.xy()) ? -1 : 0;
 	int bias2 = IsRightSideOrFlatBottomLine(v2.screenpos.xy(), v0.screenpos.xy(), v1.screenpos.xy()) ? -1 : 0;
 
+	int texlevel = 0;
+	int texbufwidthbits = 0;
+	u8 *texptr = NULL;
+	if (gstate.isTextureMapEnabled() && !gstate.isModeClear()) {
+		// TODO: Always using level 0.
+		GETextureFormat texfmt = gstate.getTextureFormat();
+		u32 texaddr = gstate.getTextureAddress(texlevel);
+		texbufwidthbits = GetTextureBufw(texlevel, texaddr, texfmt) * 8;
+		texptr = Memory::GetPointer(texaddr);
+	}
+
 	ScreenCoords pprime(minX, minY, 0);
 	int w0_base = orient2d(v1.screenpos, v2.screenpos, pprime);
 	int w1_base = orient2d(v2.screenpos, v0.screenpos, pprime);
@@ -688,7 +786,7 @@ void DrawTriangle(const VertexData& v0, const VertexData& v1, const VertexData& 
 				Vec3<int> prim_color_rgb(0, 0, 0);
 				int prim_color_a = 0;
 				Vec3<int> sec_color(0, 0, 0);
-				if ((gstate.shademodel&1) == GE_SHADE_GOURAUD) {
+				if (gstate.getShadeMode() == GE_SHADE_GOURAUD) {
 					// NOTE: When not casting color0 and color1 to float vectors, this code suffers from severe overflow issues.
 					// Not sure if that should be regarded as a bug or if casting to float is a valid fix.
 					// TODO: Is that the correct way to interpolate?
@@ -717,7 +815,7 @@ void DrawTriangle(const VertexData& v0, const VertexData& v1, const VertexData& 
 						GetTexelCoordinates(0, s, t, u, v);
 					}
 
-					Vec4<int> texcolor = Vec4<int>::FromRGBA(SampleNearest(0, u, v));
+					Vec4<int> texcolor = Vec4<int>::FromRGBA(SampleNearest(texlevel, u, v, texptr, texbufwidthbits));
 					Vec4<int> out = GetTextureFunctionOutput(prim_color_rgb, prim_color_a, texcolor);
 					prim_color_rgb = out.rgb();
 					prim_color_a = out.a();
@@ -793,71 +891,7 @@ void DrawTriangle(const VertexData& v0, const VertexData& v1, const VertexData& 
 
 				// TODO: Is alpha blending still performed if logic ops are enabled?
 				if (gstate.isLogicOpEnabled() && !gstate.isModeClear()) {
-					switch (gstate.getLogicOp()) {
-					case GE_LOGIC_CLEAR:
-						new_color = 0;
-						break;
-
-					case GE_LOGIC_AND:
-						new_color = new_color & old_color;
-						break;
-
-					case GE_LOGIC_AND_REVERSE:
-						new_color = new_color & ~old_color;
-						break;
-
-					case GE_LOGIC_COPY:
-						//new_color = new_color;
-						break;
-
-					case GE_LOGIC_AND_INVERTED:
-						new_color = ~new_color & old_color;
-						break;
-
-					case GE_LOGIC_NOOP:
-						new_color = old_color;
-						break;
-
-					case GE_LOGIC_XOR:
-						new_color = new_color ^ old_color;
-						break;
-
-					case GE_LOGIC_OR:
-						new_color = new_color | old_color;
-						break;
-
-					case GE_LOGIC_NOR:
-						new_color = ~(new_color | old_color);
-						break;
-
-					case GE_LOGIC_EQUIV:
-						new_color = ~(new_color ^ old_color);
-						break;
-
-					case GE_LOGIC_INVERTED:
-						new_color = ~old_color;
-						break;
-
-					case GE_LOGIC_OR_REVERSE:
-						new_color = new_color | ~old_color;
-						break;
-
-					case GE_LOGIC_COPY_INVERTED:
-						new_color = ~new_color;
-						break;
-
-					case GE_LOGIC_OR_INVERTED:
-						new_color = ~new_color | old_color;
-						break;
-
-					case GE_LOGIC_NAND:
-						new_color = ~(new_color & old_color);
-						break;
-
-					case GE_LOGIC_SET:
-						new_color = 0xFFFFFFFF;
-						break;
-					}
+					new_color = ApplyLogicOp(gstate.getLogicOp(), old_color, new_color);
 				}
 
 				if (gstate.isModeClear()) {

@@ -136,8 +136,20 @@ endif
 LOCAL_SRC_FILES := \
   $(ARCH_FILES) \
   TestRunner.cpp \
+  $(SRC)/Core/MIPS/MIPS.cpp.arm \
+  $(SRC)/Core/MIPS/MIPSAnalyst.cpp \
+  $(SRC)/Core/MIPS/MIPSDis.cpp \
+  $(SRC)/Core/MIPS/MIPSDisVFPU.cpp \
+  $(SRC)/Core/MIPS/MIPSInt.cpp.arm \
+  $(SRC)/Core/MIPS/MIPSIntVFPU.cpp.arm \
+  $(SRC)/Core/MIPS/MIPSStackWalk.cpp \
+  $(SRC)/Core/MIPS/MIPSTables.cpp \
+  $(SRC)/Core/MIPS/MIPSVFPUUtils.cpp.arm \
+  $(SRC)/Core/MIPS/MIPSCodeUtils.cpp.arm \
+  $(SRC)/Core/MIPS/MIPSDebugInterface.cpp \
   $(SRC)/UI/ui_atlas.cpp \
   $(SRC)/UI/NativeApp.cpp \
+  $(SRC)/UI/DevScreens.cpp \
   $(SRC)/UI/EmuScreen.cpp \
   $(SRC)/UI/MainScreen.cpp \
   $(SRC)/UI/MiscScreens.cpp \
@@ -163,6 +175,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/ext/xbrz/xbrz.cpp \
   $(SRC)/ext/xxhash.c \
   $(SRC)/Common/Crypto/md5.cpp \
+  $(SRC)/Common/Crypto/sha1.cpp \
   $(SRC)/Common/KeyMap.cpp \
   $(SRC)/Common/LogManager.cpp \
   $(SRC)/Common/MemArena.cpp \
@@ -179,10 +192,12 @@ LOCAL_SRC_FILES := \
   $(SRC)/GPU/GPUCommon.cpp \
   $(SRC)/GPU/GPUState.cpp \
   $(SRC)/GPU/GeDisasm.cpp \
+  $(SRC)/GPU/Common/IndexGenerator.cpp.arm \
+  $(SRC)/GPU/Common/VertexDecoderCommon.cpp.arm \
+  $(SRC)/GPU/Common/TextureDecoder.cpp \
   $(SRC)/GPU/GLES/Framebuffer.cpp \
   $(SRC)/GPU/GLES/GLES_GPU.cpp.arm \
   $(SRC)/GPU/GLES/TextureCache.cpp.arm \
-  $(SRC)/GPU/GLES/IndexGenerator.cpp.arm \
   $(SRC)/GPU/GLES/TransformPipeline.cpp.arm \
   $(SRC)/GPU/GLES/StateMapping.cpp.arm \
   $(SRC)/GPU/GLES/VertexDecoder.cpp.arm \
@@ -226,6 +241,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/Core/Debugger/Breakpoints.cpp \
   $(SRC)/Core/Debugger/SymbolMap.cpp \
   $(SRC)/Core/Dialog/PSPDialog.cpp \
+  $(SRC)/Core/Dialog/PSPGamedataInstallDialog.cpp \
   $(SRC)/Core/Dialog/PSPMsgDialog.cpp \
   $(SRC)/Core/Dialog/PSPOskDialog.cpp \
   $(SRC)/Core/Dialog/PSPPlaceholderDialog.cpp \
@@ -246,6 +262,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/Core/HLE/sceDmac.cpp \
   $(SRC)/Core/HLE/sceGe.cpp \
   $(SRC)/Core/HLE/sceFont.cpp \
+  $(SRC)/Core/HLE/sceHeap.cpp \
   $(SRC)/Core/HLE/sceHprm.cpp \
   $(SRC)/Core/HLE/sceHttp.cpp \
   $(SRC)/Core/HLE/sceImpose.cpp \
@@ -269,6 +286,7 @@ LOCAL_SRC_FILES := \
   $(SRC)/Core/HLE/sceMp4.cpp \
   $(SRC)/Core/HLE/sceMp3.cpp \
   $(SRC)/Core/HLE/sceNet.cpp \
+  $(SRC)/Core/HLE/sceNetAdhoc.cpp \
   $(SRC)/Core/HLE/sceOpenPSID.cpp \
   $(SRC)/Core/HLE/sceP3da.cpp \
   $(SRC)/Core/HLE/sceParseHttp.cpp \
@@ -292,17 +310,6 @@ LOCAL_SRC_FILES := \
   $(SRC)/Core/FileSystems/DirectoryFileSystem.cpp \
   $(SRC)/Core/FileSystems/VirtualDiscFileSystem.cpp \
   $(SRC)/Core/FileSystems/tlzrc.cpp \
-  $(SRC)/Core/MIPS/MIPS.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSAnalyst.cpp \
-  $(SRC)/Core/MIPS/MIPSDis.cpp \
-  $(SRC)/Core/MIPS/MIPSDisVFPU.cpp \
-  $(SRC)/Core/MIPS/MIPSInt.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSIntVFPU.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSStackWalk.cpp \
-  $(SRC)/Core/MIPS/MIPSTables.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSVFPUUtils.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSCodeUtils.cpp.arm \
-  $(SRC)/Core/MIPS/MIPSDebugInterface.cpp \
   $(SRC)/Core/MIPS/JitCommon/JitCommon.cpp \
   $(SRC)/Core/MIPS/JitCommon/JitBlockCache.cpp \
   $(SRC)/Core/Util/BlockAllocator.cpp \

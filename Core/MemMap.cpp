@@ -57,9 +57,9 @@ u8 *m_pUncachedVRAM;
 
 // Holds the ending address of the PSP's user space.
 // Required for HD Remasters to work properly.
-// These replace RAM_SIZE and RAM_MASK, respectively.
-u32 g_MemoryMask;
+// These replace RAM_NORMAL_SIZE and RAM_NORMAL_MASK, respectively.
 u32 g_MemorySize;
+u32 g_MemoryMask;
 
 // We don't declare the IO region in here since its handled by other means.
 static MemoryView views[] =
@@ -81,7 +81,10 @@ static const int num_views = sizeof(views) / sizeof(MemoryView);
 void Init()
 {
 	int flags = 0;
-	Memory::g_MemoryMask = Memory::g_MemorySize - 1;
+	// This mask is used ONLY after validating the address is in the correct range.
+	// So let's just use a fixed mask to remove the uncached/user memory bits.
+	// Using (Memory::g_MemorySize - 1) won't work for e.g. 0x04C00000.
+	Memory::g_MemoryMask = 0x07FFFFFF;
 
 	for (size_t i = 0; i < ARRAY_SIZE(views); i++) {
 		if (views[i].flags & MV_IS_PRIMARY_RAM)
@@ -95,6 +98,10 @@ void Init()
 
 void DoState(PointerWrap &p)
 {
+	auto s = p.Section("Memory", 1);
+	if (!s)
+		return;
+
 	p.DoArray(m_pRAM, g_MemorySize);
 	p.DoMarker("RAM");
 	p.DoArray(m_pVRAM, VRAM_SIZE);

@@ -22,6 +22,8 @@
 #include "Core/Config.h" 
 #include "SasAudio.h"
 
+#include <algorithm>
+
 // #define AUDIO_TO_FILE
 
 static const s8 f[16][2] = {
@@ -65,7 +67,7 @@ void VagDecoder::DecodeBlock(u8 *&readp) {
 	predict_nr >>= 4;
 	int flags = *readp++;
 	if (flags == 7) {
-		VERBOSE_LOG(SAS, "VAG ending block at %d", curBlock_);
+		VERBOSE_LOG(SASMIX, "VAG ending block at %d", curBlock_);
 		end_ = true;
 		return;
 	}
@@ -105,14 +107,14 @@ void VagDecoder::GetSamples(s16 *outSamples, int numSamples) {
 	u8 *readp = Memory::GetPointer(read_);
 	if (!readp)
 	{
-		WARN_LOG(SAS, "Bad VAG samples address?");
+		WARN_LOG(SASMIX, "Bad VAG samples address?");
 		return;
 	}
 	u8 *origp = readp;
 	for (int i = 0; i < numSamples; i++) {
 		if (curSample == 28) {
 			if (loopAtNextBlock_) {
-				VERBOSE_LOG(SAS, "Looping VAG from block %d/%d to %d", curBlock_, numBlocks_, loopStartBlock_);
+				VERBOSE_LOG(SASMIX, "Looping VAG from block %d/%d to %d", curBlock_, numBlocks_, loopStartBlock_);
 				// data_ starts at curBlock = -1.
 				read_ = data_ + 16 * loopStartBlock_ + 16;
 				readp = Memory::GetPointer(read_);
@@ -137,6 +139,10 @@ void VagDecoder::GetSamples(s16 *outSamples, int numSamples) {
 
 void VagDecoder::DoState(PointerWrap &p)
 {
+	auto s = p.Section("VagDecoder", 1);
+	if (!s)
+		return;
+
 	p.DoArray(samples, ARRAY_SIZE(samples));
 	p.Do(curSample);
 
@@ -190,6 +196,10 @@ int SasAtrac3::addStreamData(u8* buf, u32 addbytes) {
 }
 
 void SasAtrac3::DoState(PointerWrap &p) {
+	auto s = p.Section("SasAtrac3", 1);
+	if (!s)
+		return;
+
 	p.Do(contextAddr);
 	p.Do(atracID);
 	if (p.mode == p.MODE_READ && atracID >= 0 && !sampleQueue) {
@@ -234,7 +244,7 @@ static int getSustainType(int bitfield2) {
 	case 4: return PSP_SAS_ADSR_CURVE_MODE_LINEAR_BENT;
 	case 6: return PSP_SAS_ADSR_CURVE_MODE_EXPONENT_DECREASE;
 	}
-	ERROR_LOG(SAS,"sasSetSimpleADSR,ERROR_SAS_INVALID_ADSR_CURVE_MODE");
+	ERROR_LOG(SASMIX,"sasSetSimpleADSR,ERROR_SAS_INVALID_ADSR_CURVE_MODE");
 	return 0;
 }
 
@@ -357,7 +367,7 @@ void SasInstance::Mix(u32 outAddr, u32 inAddr, int leftVol, int rightVol) {
 			// But for now, see Smoothness HACKERY below :P
 			u32 numSamples = (voice.sampleFrac + grainSize * voice.pitch) / PSP_SAS_PITCH_BASE;
 			if ((int)numSamples > grainSize * 4) {
-				ERROR_LOG(SAS, "numSamples too large, clamping: %i vs %i", numSamples, grainSize * 4);
+				ERROR_LOG(SASMIX, "numSamples too large, clamping: %i vs %i", numSamples, grainSize * 4);
 				numSamples = grainSize * 4;
 			}
 
@@ -492,6 +502,10 @@ void SasInstance::Mix(u32 outAddr, u32 inAddr, int leftVol, int rightVol) {
 }
 
 void SasInstance::DoState(PointerWrap &p) {
+	auto s = p.Section("SasInstance", 1);
+	if (!s)
+		return;
+
 	p.Do(grainSize);
 	if (p.mode == p.MODE_READ) {
 		if (grainSize > 0) {
@@ -525,8 +539,6 @@ void SasInstance::DoState(PointerWrap &p) {
 	}
 	p.DoArray(voices, ARRAY_SIZE(voices));
 	p.Do(waveformEffect);
-
-	p.DoMarker("SasInstance");
 }
 
 void SasVoice::Reset() {
@@ -541,7 +553,7 @@ void SasVoice::KeyOn() {
 		if (Memory::IsValidAddress(vagAddr)) {
 			vag.Start(vagAddr, vagSize, loop);
 		} else {
-			ERROR_LOG(SAS, "Invalid VAG address %08x", vagAddr);
+			ERROR_LOG(SASMIX, "Invalid VAG address %08x", vagAddr);
 			return;
 		}
 		break;
@@ -569,6 +581,10 @@ void SasVoice::ChangedParams(bool changedVag) {
 
 void SasVoice::DoState(PointerWrap &p)
 {
+	auto s = p.Section("SasVoice", 1);
+	if (!s)
+		return;
+
 	p.Do(playing);
 	p.Do(paused);
 	p.Do(on);
@@ -595,8 +611,6 @@ void SasVoice::DoState(PointerWrap &p)
 	p.Do(effectLeft);
 	p.Do(effectRight);
 	p.DoArray(resampleHist, ARRAY_SIZE(resampleHist));
-
-	p.DoMarker("SasVoice");
 
 	envelope.DoState(p);
 	vag.DoState(p);
@@ -789,6 +803,10 @@ void ADSREnvelope::KeyOff() {
 }
 
 void ADSREnvelope::DoState(PointerWrap &p) {
+	auto s = p.Section("ADSREnvelope", 1);
+	if (!s)
+		return;
+
 	p.Do(attackRate);
 	p.Do(decayRate);
 	p.Do(sustainRate);
@@ -801,5 +819,4 @@ void ADSREnvelope::DoState(PointerWrap &p) {
 	p.Do(state_);
 	p.Do(steps_);
 	p.Do(height_);
-	p.DoMarker("ADSREnvelope");
 }

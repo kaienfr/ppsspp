@@ -64,11 +64,12 @@ static const GLushort eqLookup[] = {
 #if defined(USING_GLES2)
 	GL_FUNC_ADD,
 	GL_FUNC_ADD,
+	GL_FUNC_ADD, // this is GE_BLENDMODE_ABSDIFF
 #else
 	GL_MIN,
 	GL_MAX,
+	GL_MAX, // this is GE_BLENDMODE_ABSDIFF
 #endif
-	GL_FUNC_ADD, // should be abs(diff)
 };
 
 static const GLushort cullingMode[] = {
@@ -159,7 +160,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 
 		int blendFuncA  = gstate.getBlendFuncA();
 		int blendFuncB  = gstate.getBlendFuncB();
-		int blendFuncEq = gstate.getBlendEq();
+		GEBlendMode blendFuncEq = gstate.getBlendEq();
 		if (blendFuncA > GE_SRCBLEND_FIXA) blendFuncA = GE_SRCBLEND_FIXA;
 		if (blendFuncB > GE_DSTBLEND_FIXB) blendFuncB = GE_DSTBLEND_FIXB;
 
@@ -196,7 +197,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 						Reporting::ReportMessage("ERROR INVALID blendcolorstate: FixA=%06x FixB=%06x FuncA=%i FuncB=%i", gstate.getFixA(), gstate.getFixB(), gstate.getBlendFuncA(), gstate.getBlendFuncB());
 					didReportBlend = true;
 
-					DEBUG_LOG(HLE, "ERROR INVALID blendcolorstate: FixA=%06x FixB=%06x FuncA=%i FuncB=%i", gstate.getFixA(), gstate.getFixB(), gstate.getBlendFuncA(), gstate.getBlendFuncB());
+					DEBUG_LOG(G3D, "ERROR INVALID blendcolorstate: FixA=%06x FixB=%06x FuncA=%i FuncB=%i", gstate.getFixA(), gstate.getFixB(), gstate.getBlendFuncA(), gstate.getBlendFuncB());
 					// Let's approximate, at least.  Close is better than totally off.
 					const bool nearZeroA = blendColorSimilar(fixA, Vec3f::AssignToAll(0.0f), 0.25f);
 					const bool nearZeroB = blendColorSimilar(fixB, Vec3f::AssignToAll(0.0f), 0.25f);
@@ -217,16 +218,24 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		}
 
 		// At this point, through all paths above, glBlendFuncA and glBlendFuncB will be set right somehow.
-		if (!gstate.isStencilTestEnabled()) {
+		if (!gstate.isStencilTestEnabled() && !gstate.isDepthTestEnabled()) {
 			// Fixes some Persona 2 issues, may be correct? (that is, don't change dest alpha at all if blending)
 			// If this doesn't break anything else, it's likely to be right.
 			// I guess an alternative solution would be to simply disable alpha writes if alpha blending is enabled.
-			glstate.blendFuncSeparate.set(glBlendFuncA, glBlendFuncB, GL_ZERO, glBlendFuncB);
+			glstate.blendFuncSeparate.set(glBlendFuncA, glBlendFuncB, GL_ZERO, GL_ZERO);
 		} else {
 			glstate.blendFuncSeparate.set(glBlendFuncA, glBlendFuncB, glBlendFuncA, glBlendFuncB);
 		}
+#if !defined(USING_GLES2)
+		if (blendFuncEq == GE_BLENDMODE_ABSDIFF) {
+			WARN_LOG_REPORT_ONCE(blendAbsdiff, G3D, "Unsupported absdiff blend mode");
+		}
+#endif
 		glstate.blendEquation.set(eqLookup[blendFuncEq]);
 	}
+
+	bool alwaysDepthWrite = g_Config.bAlwaysDepthWrite;
+	bool enableStencilTest = !g_Config.bDisableStencilTest;
 
 	// Dither
 	if (gstate.isDitherEnabled()) {
@@ -247,7 +256,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		// Depth Test
 		glstate.depthTest.enable();
 		glstate.depthFunc.set(GL_ALWAYS);
-		glstate.depthWrite.set(gstate.isClearModeDepthWriteEnabled() ? GL_TRUE : GL_FALSE);
+		glstate.depthWrite.set(gstate.isClearModeDepthWriteEnabled() || alwaysDepthWrite ? GL_TRUE : GL_FALSE);
 
 		// Color Test
 		bool colorMask = gstate.isClearModeColorMask();
@@ -255,7 +264,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		glstate.colorMask.set(colorMask, colorMask, colorMask, alphaMask);
 
 		// Stencil Test
-		if (alphaMask) {
+		if (alphaMask && enableStencilTest) {
 			glstate.stencilTest.enable();
 			glstate.stencilOp.set(GL_REPLACE, GL_REPLACE, GL_REPLACE);
 			glstate.stencilFunc.set(GL_ALWAYS, 0, 0xFF);
@@ -283,8 +292,8 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		// Depth Test
 		if (gstate.isDepthTestEnabled()) {
 			glstate.depthTest.enable();
-			glstate.depthFunc.set(ztests[gstate.getDepthTestFunc()]);
-			glstate.depthWrite.set(gstate.isDepthWriteEnabled() ? GL_TRUE : GL_FALSE);
+			glstate.depthFunc.set(ztests[gstate.getDepthTestFunction()]);
+			glstate.depthWrite.set(gstate.isDepthWriteEnabled() || alwaysDepthWrite ? GL_TRUE : GL_FALSE);
 		} else 
 			glstate.depthTest.disable();
 		
@@ -297,7 +306,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		glstate.colorMask.set(rmask, gmask, bmask, amask);
 		
 		// Stencil Test
-		if (gstate.isStencilTestEnabled()) {
+		if (gstate.isStencilTestEnabled() && enableStencilTest) {
 			glstate.stencilTest.enable();
 			glstate.stencilFunc.set(ztests[gstate.getStencilTestFunction()],
 				gstate.getStencilTestRef(),
@@ -319,16 +328,15 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 		renderY = 0.0f;
 		renderWidth = framebufferManager_->GetRenderWidth();
 		renderHeight = framebufferManager_->GetRenderHeight();
-		renderWidthFactor = (float)renderWidth / framebufferManager_->GetTargetWidth();
-		renderHeightFactor = (float)renderHeight / framebufferManager_->GetTargetHeight();
 	} else {
 		// TODO: Aspect-ratio aware and centered
 		float pixelW = PSP_CoreParameter().pixelWidth;
 		float pixelH = PSP_CoreParameter().pixelHeight;
 		CenterRect(&renderX, &renderY, &renderWidth, &renderHeight, 480, 272, pixelW, pixelH);
-		renderWidthFactor = renderWidth / 480.0f;
-		renderHeightFactor = renderHeight / 272.0f;
 	}
+	
+	renderWidthFactor = (float)renderWidth / framebufferManager_->GetTargetWidth();
+	renderHeightFactor = (float)renderHeight / framebufferManager_->GetTargetHeight();
 
 	bool throughmode = gstate.isModeThrough();
 
@@ -363,8 +371,8 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 	int regionX2 = gstate_c.curRTWidth;
 	int regionY2 = gstate_c.curRTHeight;
 
-	float offsetX = (float)(gstate.offsetx & 0xFFFF) / 16.0f;
-	float offsetY = (float)(gstate.offsety & 0xFFFF) / 16.0f;
+	float offsetX = gstate.getOffsetX();
+	float offsetY = gstate.getOffsetY();
 
 	if (throughmode) {
 		// No viewport transform here. Let's experiment with using region.
