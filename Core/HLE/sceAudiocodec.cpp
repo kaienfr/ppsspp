@@ -34,13 +34,28 @@ int sceAudiocodecGetInfo(u32 audioCodec, int codec) {
 	return 0;
 }
 
+int sceAudiocodecGetEDRAM(u32 audioCodec, int codec) {
+	ERROR_LOG_REPORT(ME, "UNIMPL sceAudiocodecGetEDRAM(%08x, %i)", audioCodec, codec);
+	return 0;
+}
+
+int sceAudiocodecReleaseEDRAM(u32 audioCodec) {
+	ERROR_LOG_REPORT(ME, "UNIMPL sceAudiocodecReleaseEDRAM(%08x)", audioCodec);
+	return 0;
+}
+
+int sceAudiocodecCheckNeedMem(u32 audioCodec, int codec) {
+	ERROR_LOG_REPORT(ME, "UNIMPL sceAudiocodecCheckNeedMem(%08x, %i)", audioCodec, codec);
+	return 0;
+}
+
 const HLEFunction sceAudiocodec[] = {
 	{0x70A703F8, WrapI_UI<sceAudiocodecDecode>, "sceAudiocodecDecode"},
 	{0x5B37EB1D, WrapI_UI<sceAudiocodecInit>, "sceAudiocodecInit"},
 	{0x8ACA11D5, WrapI_UI<sceAudiocodecGetInfo>, "sceAudiocodecGetInfo"},
-	{0x3A20A200, 0, "sceAudiocodecGetEDRAM"},
-	{0x29681260, 0, "sceAudiocodecReleaseEDRAM"},
-	{0x9D3F790C, 0, "sceAudiocodecCheckNeedMem"},
+	{0x3A20A200, WrapI_UI<sceAudiocodecGetEDRAM>, "sceAudiocodecGetEDRAM"},
+	{0x29681260, WrapI_U<sceAudiocodecReleaseEDRAM>, "sceAudiocodecReleaseEDRAM"},
+	{0x9D3F790C, WrapI_UI<sceAudiocodecCheckNeedMem>, "sceAudiocodecCheckNeedMem"},
 	{0x59176a0f, 0, "sceAudiocodec_59176A0F"},
 };
 
