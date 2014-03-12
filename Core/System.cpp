@@ -17,7 +17,9 @@
 
 #ifdef _WIN32
 #include "Common/CommonWindows.h"
+#ifndef _XBOX
 #include <ShlObj.h>
+#endif
 #include <string>
 #include <codecvt>
 #endif
@@ -324,13 +326,22 @@ bool PSP_InitStart(const CoreParameter &coreParam, std::string *error_string) {
 		Core_ListenShutdown(System_Wake);
 		CPU_SetState(CPU_THREAD_PENDING);
 		cpuThread = new std::thread(&CPU_RunLoop);
+#ifdef _XBOX
+		SuspendThread(cpuThread->native_handle());
+		XSetThreadProcessor(cpuThread->native_handle(), 2);
+		ResumeThread(cpuThread->native_handle());
+#endif
 		cpuThread->detach();
 	} else {
 		CPU_Init();
 	}
 
 	*error_string = coreParameter.errorString;
-	return coreParameter.fileToStart != "";
+	bool success = coreParameter.fileToStart != "";
+	if (!success) {
+		pspIsIniting = false;
+	}
+	return success;
 }
 
 bool PSP_InitUpdate(std::string *error_string) {
@@ -455,6 +466,8 @@ std::string GetSysDirectory(PSPDirectories directoryType) {
 		return g_Config.memCardDirectory + "PSP/SYSTEM/";
 	case DIRECTORY_PAUTH:
 		return g_Config.memCardDirectory + "PAUTH/";
+	case DIRECTORY_DUMP:
+		return g_Config.memCardDirectory + "PSP/SYSTEM/DUMP/";
 	// Just return the memory stick root if we run into some sort of problem.
 	default:
 		ERROR_LOG(FILESYS, "Unknown directory type.");
@@ -462,7 +475,7 @@ std::string GetSysDirectory(PSPDirectories directoryType) {
 	}
 }
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(_XBOX)
 // Run this at startup time. Please use GetSysDirectory if you need to query where folders are.
 void InitSysDirectories() {
 	if (!g_Config.memCardDirectory.empty() && !g_Config.flash0Directory.empty())

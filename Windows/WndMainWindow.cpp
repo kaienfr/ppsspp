@@ -79,7 +79,8 @@
 #include "XPTheme.h"
 #endif
 
-#define MOUSEEVENTF_FROMTOUCH 0xFF515700
+#define MOUSEEVENTF_FROMTOUCH_NOPEN 0xFF515780 //http://msdn.microsoft.com/en-us/library/windows/desktop/ms703320(v=vs.85).aspx
+#define MOUSEEVENTF_MASK_PLUS_PENTOUCH 0xFFFFFF80
 
 static const int numCPUs = 1;
 
@@ -426,6 +427,10 @@ namespace MainWindow
 		EnableMenuItem(menu, ID_EMULATION_STOP, menuEnable);
 		EnableMenuItem(menu, ID_EMULATION_RESET, menuEnable);
 		EnableMenuItem(menu, ID_EMULATION_SWITCH_UMD, umdSwitchEnable);
+		EnableMenuItem(menu, ID_DEBUG_LOADMAPFILE, menuEnable);
+		EnableMenuItem(menu, ID_DEBUG_SAVEMAPFILE, menuEnable);
+		EnableMenuItem(menu, ID_DEBUG_RESETSYMBOLTABLE, menuEnable);
+		EnableMenuItem(menu, ID_DEBUG_EXTRACTFILE, menuEnable);
 	}
 
 	// These are used as an offset
@@ -940,7 +945,7 @@ namespace MainWindow
 
 		case WM_LBUTTONDOWN:
 			if (!touchHandler.hasTouch() ||
-				(GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) != MOUSEEVENTF_FROMTOUCH ) 
+				(GetMessageExtraInfo() & MOUSEEVENTF_MASK_PLUS_PENTOUCH) != MOUSEEVENTF_FROMTOUCH_NOPEN)
 			{
 				// Hack: Take the opportunity to show the cursor.
 				mouseButtonDown = true;
@@ -960,13 +965,13 @@ namespace MainWindow
 				touch.y = input_state.pointer_y[0];
 				NativeTouch(touch);
 				SetCapture(hWnd);
-				
+
 			}
 			break;
 
 		case WM_MOUSEMOVE:
 			if (!touchHandler.hasTouch() ||
-				(GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) != MOUSEEVENTF_FROMTOUCH)
+				(GetMessageExtraInfo() & MOUSEEVENTF_MASK_PLUS_PENTOUCH) != MOUSEEVENTF_FROMTOUCH_NOPEN)
 			{
 				// Hack: Take the opportunity to show the cursor.
 				mouseButtonDown = (wParam & MK_LBUTTON) != 0;
@@ -998,7 +1003,7 @@ namespace MainWindow
 
 		case WM_LBUTTONUP:
 			if (!touchHandler.hasTouch() ||
-				(GetMessageExtraInfo() & MOUSEEVENTF_FROMTOUCH) != MOUSEEVENTF_FROMTOUCH)
+				(GetMessageExtraInfo() & MOUSEEVENTF_MASK_PLUS_PENTOUCH) != MOUSEEVENTF_FROMTOUCH_NOPEN)
 			{
 				// Hack: Take the opportunity to hide the cursor.
 				mouseButtonDown = false;
@@ -1021,7 +1026,7 @@ namespace MainWindow
 		case WM_TOUCH:
 			{
 				touchHandler.handleTouchEvent(hWnd, message, wParam, lParam);
-				return DefWindowProc(hWnd, message, wParam, lParam);
+				return 0;
 			}
 
 		case WM_PAINT:
@@ -1384,7 +1389,7 @@ namespace MainWindow
 							MessageBox(hwndMain, L"File does not exist.", L"Sorry",0);
 						} else if (info.type == FILETYPE_DIRECTORY) {
 							MessageBox(hwndMain, L"Cannot extract directories.", L"Sorry",0);
-						} else if (W32Util::BrowseForFileName(false, hWnd, L"Save file as...", 0, L"0All files\0*.*\0\0", L"", fn)) {
+						} else if (W32Util::BrowseForFileName(false, hWnd, L"Save file as...", 0, L"All files\0*.*\0\0", L"", fn)) {
 							FILE *fp = fopen(fn.c_str(), "wb");
 							u32 handle = pspFileSystem.OpenFile(filename, FILEACCESS_READ, "");
 							u8 buffer[4096];

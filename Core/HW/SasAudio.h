@@ -61,6 +61,9 @@ enum {
 	PSP_SAS_EFFECT_TYPE_ECHO = 6,
 	PSP_SAS_EFFECT_TYPE_DELAY = 7,
 	PSP_SAS_EFFECT_TYPE_PIPE = 8,
+
+	PSP_SAS_OUTPUTMODE_MIXED = 0,
+	PSP_SAS_OUTPUTMODE_RAW = 1,
 };
 
 struct WaveformEffect {
@@ -88,7 +91,7 @@ enum VoiceType {
 class VagDecoder {
 public:
 	VagDecoder() : data_(0), read_(0), end_(true) {}
-	void Start(u32 dataPtr, int vagSize, bool loopEnabled);
+	void Start(u32 dataPtr, u32 vagSize, bool loopEnabled);
 
 	void GetSamples(s16 *outSamples, int numSamples);
 
@@ -205,8 +208,6 @@ struct SasVoice {
 			noiseFreq(0),
 			volumeLeft(PSP_SAS_VOL_MAX),
 			volumeRight(PSP_SAS_VOL_MAX),
-			volumeLeftSend(0),
-			volumeRightSend(0),
 			effectLeft(PSP_SAS_VOL_MAX),
 			effectRight(PSP_SAS_VOL_MAX) {
 		memset(resampleHist, 0, sizeof(resampleHist));
@@ -229,7 +230,7 @@ struct SasVoice {
 	VoiceType type;
 
 	u32 vagAddr;
-	int vagSize;
+	u32 vagSize;
 	u32 pcmAddr;
 	int pcmSize;
 	int pcmIndex;
@@ -245,12 +246,7 @@ struct SasVoice {
 	int volumeLeft;
 	int volumeRight;
 
-	// I am pretty sure that volumeLeftSend and effectLeft really are the same thing (and same for right of course).
-	// We currently have nothing that ever modifies volume*Send.
-	// One game that uses an effect (probably a reverb) is MHU.
-
-	int volumeLeftSend;	// volume to "Send" (audio-lingo) to the effects processing engine, like reverb
-	int volumeRightSend;
+	// volume to "Send" (audio-lingo) to the effects processing engine, like reverb
 	int effectLeft;
 	int effectRight;
 	s16 resampleHist[2];
@@ -292,10 +288,5 @@ public:
 	WaveformEffect waveformEffect;
 
 private:
-	void MixSamples(SasVoice &voice);
-	void MixSamplesHalfPitch(SasVoice &voice);
-	void MixSamplesOptimal(SasVoice &voice);
-	void MixSample(SasVoice &voice, int i, int sample, u8 volumeShift);
-
 	int grainSize;
 };

@@ -20,7 +20,9 @@
 #include "ext/vjson/json.h"
 #include "file/ini_file.h"
 #include "i18n/i18n.h"
+#ifndef _XBOX
 #include "gfx_es2/gpu_features.h"
+#endif
 #include "net/http_client.h"
 #include "util/text/parsers.h"
 #include "net/url.h"
@@ -291,7 +293,7 @@ static ConfigSetting generalSettings[] = {
 	ConfigSetting("WindowHeight", &g_Config.iWindowHeight, 0),
 	ConfigSetting("PauseOnLostFocus", &g_Config.bPauseOnLostFocus, false),
 #endif
-
+	ConfigSetting("DumpDecryptedEboots", &g_Config.bDumpDecryptedEboot, false),
 	ConfigSetting(false),
 };
 
@@ -433,6 +435,9 @@ static ConfigSetting controlSettings[] = {
 	ConfigSetting("ShowAnalogStick", &g_Config.bShowTouchAnalogStick, true),
 	ConfigSetting("ShowTouchDpad", &g_Config.bShowTouchDpad, true),
 	ConfigSetting("ShowTouchUnthrottle", &g_Config.bShowTouchUnthrottle, true),
+#if !defined(__SYMBIAN32__) && !defined(IOS) && !defined(MEEGO_EDITION_HARMATTAN)
+	ConfigSetting("ShowTouchPause", &g_Config.bShowTouchPause, false),
+#endif
 #if defined(USING_WIN_UI)
 	ConfigSetting("IgnoreWindowsKey", &g_Config.bIgnoreWindowsKey, false),
 #endif

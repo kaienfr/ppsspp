@@ -73,6 +73,7 @@
 #include "scePspNpDrm_user.h"
 #include "sceVaudio.h"
 #include "sceHeap.h"
+#include "sceDmac.h"
 
 #include "../Util/PPGeDraw.h"
 
@@ -131,6 +132,7 @@ void __KernelInit()
 	__VaudioInit();
 	__CheatInit();
 	__HeapInit();
+	__DmacInit();
 	
 	SaveState::Init();  // Must be after IO, as it may create a directory
 	Reporting::Init();
@@ -351,6 +353,9 @@ int sceKernelDcacheInvalidateRange(u32 addr, int size)
 int sceKernelIcacheInvalidateRange(u32 addr, int size) {
 	DEBUG_LOG(CPU,"sceKernelIcacheInvalidateRange(%08x, %i)", addr, size);
 	// TODO: Make the JIT hash and compare the touched blocks.
+	if(MIPSComp::jit){
+		MIPSComp::jit->ClearCacheAt(addr, size);
+	}
 	return 0;
 }
 

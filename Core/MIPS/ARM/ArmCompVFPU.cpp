@@ -364,16 +364,32 @@ namespace MIPSComp
 					skip = B_CC(CC_EQ);
 				}
 
-				for (int i = 0; i < 4; i++)
-					VLDR(fpr.V(vregs[i]), R0, i * 4);
+				bool consecutive = true;
+				for (int i = 0; i < 3 && consecutive; i++)
+					if ((fpr.V(vregs[i]) + 1) != fpr.V(vregs[i+1]))
+						consecutive = false;
+				if (consecutive) {
+					VLDMIA(R0, false, fpr.V(vregs[0]), 4);
+				} else {
+					for (int i = 0; i < 4; i++)
+						VLDR(fpr.V(vregs[i]), R0, i * 4);
+				}
 
 				if (doCheck) {
 					SetJumpTarget(skip);
 					SetCC(CC_AL);
 				}
 #else
-				for (int i = 0; i < 4; i++)
-					VLDR(fpr.V(vregs[i]), R0, i * 4);
+				bool consecutive = true;
+				for (int i = 0; i < 3 && consecutive; i++)
+					if ((fpr.V(vregs[i]) + 1) != fpr.V(vregs[i+1]))
+						consecutive = false;
+				if (consecutive) {
+					VLDMIA(R0, false, fpr.V(vregs[0]), 4);
+				} else {
+					for (int i = 0; i < 4; i++)
+						VLDR(fpr.V(vregs[i]), R0, i * 4);
+				}
 
 				if (doCheck) {
 					SetCC(CC_EQ);
@@ -413,16 +429,32 @@ namespace MIPSComp
 					skip = B_CC(CC_EQ);
 				}
 
-				for (int i = 0; i < 4; i++)
-					VSTR(fpr.V(vregs[i]), R0, i * 4);
+				bool consecutive = true;
+				for (int i = 0; i < 3 && consecutive; i++)
+					if ((fpr.V(vregs[i]) + 1) != fpr.V(vregs[i+1]))
+						consecutive = false;
+				if (consecutive) {
+					VSTMIA(R0, false, fpr.V(vregs[0]), 4);
+				} else {
+					for (int i = 0; i < 4; i++)
+						VSTR(fpr.V(vregs[i]), R0, i * 4);
+				}
 
 				if (doCheck) {
 					SetJumpTarget(skip);
 					SetCC(CC_AL);
 				}
 #else
-				for (int i = 0; i < 4; i++)
-					VSTR(fpr.V(vregs[i]), R0, i * 4);
+				bool consecutive = true;
+				for (int i = 0; i < 3 && consecutive; i++)
+					if ((fpr.V(vregs[i]) + 1) != fpr.V(vregs[i+1]))
+						consecutive = false;
+				if (consecutive) {
+					VSTMIA(R0, false, fpr.V(vregs[0]), 4);
+				} else {
+					for (int i = 0; i < 4; i++)
+						VSTR(fpr.V(vregs[i]), R0, i * 4);
+				}
 
 				if (doCheck) {
 					SetCC(CC_AL);
@@ -1014,8 +1046,8 @@ namespace MIPSComp
 			VMOV(tmp[i], fpr.V(sregs[i]));
 		}
 
-		// This always converts four 32-bit floats in Q0 to four 16-bit floats
-		// in D0. If we are dealing with a pair here, we just ignore the upper two outputs.
+		// This always converts four 16-bit floats in D0 to four 32-bit floats
+		// in Q0. If we are dealing with a pair here, we just ignore the upper two outputs.
 		// There are also a couple of other instructions that do it one at a time but doesn't
 		// seem worth the trouble.
 		VCVTF32F16(Q0, D0);
@@ -1812,8 +1844,7 @@ namespace MIPSComp
 		VMOV(R0, fpr.V(sreg));
 		QuickCallFunction(R1, negSin ? (void *)&SinCosNegSin : (void *)&SinCos);
 		gpr.SetRegImm(R0, (u32)(&sincostemp[0]));
-		VLDR(S0, R0, 0);
-		VLDR(S1, R0, 4);
+		VLDMIA(R0, false, S0, 2);
 
 		char what[4] = {'0', '0', '0', '0'};
 		if (((imm >> 2) & 3) == (imm & 3)) {
