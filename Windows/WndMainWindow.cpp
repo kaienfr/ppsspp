@@ -619,6 +619,7 @@ namespace MainWindow
 		TranslateMenuItem(ID_DEBUG_EXTRACTFILE);
 		TranslateMenuItem(ID_DEBUG_LOG, L"\tCtrl+L");
 		TranslateMenuItem(ID_DEBUG_MEMORYVIEW, L"\tCtrl+M");
+		TranslateMenuItem(ID_MEMVIEW_DUMP);
 
 		// Options menu
 		TranslateMenuItem(ID_OPTIONS_LANGUAGE);
@@ -1368,6 +1369,23 @@ namespace MainWindow
 				case ID_DEBUG_MEMORYVIEW:
 					if (memoryWindow[0])
 						memoryWindow[0]->Show(true);
+					break;
+
+				case ID_MEMVIEW_DUMP:
+					FILE* output;
+					output = fopen("RAM.dump", "wb");
+					if (output == NULL)
+					{
+						char errorMessage[256] = "Could not open file \"RAM.dump\".";
+						MessageBoxA(hWnd, errorMessage, "Error", MB_OK);
+						break;
+					}
+
+					if (!Core_IsStepping()) Core_EnableStepping(true); // If emulator isn't paused force paused state
+					fwrite(Memory::GetPointer(0x08800000), 1, 0x03800000, output);
+					fclose(output);
+					MessageBoxA(hWnd, "RAM.dump Done.", "Information", MB_OK); 
+					Core_EnableStepping(false); // resume emulation.
 					break;
 
 				case ID_DEBUG_EXTRACTFILE:

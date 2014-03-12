@@ -429,6 +429,7 @@ BEGIN
         MENUITEM "Extract File...",                         ID_DEBUG_EXTRACTFILE
         MENUITEM "Log Console",                             ID_DEBUG_LOG
         MENUITEM "Memory View...",                          ID_DEBUG_MEMORYVIEW
+		MENUITEM "Dump RAM",                                ID_MEMVIEW_DUMP
     END
 
     POPUP "Options"
