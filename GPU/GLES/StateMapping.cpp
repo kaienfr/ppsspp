@@ -419,6 +419,7 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 				amask = false;
 			}
 		}
+        amask = true;
 
 		glstate.colorMask.set(rmask, gmask, bmask, amask);
 
