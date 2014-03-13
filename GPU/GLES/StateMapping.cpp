@@ -333,7 +333,6 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 
 	bool alwaysDepthWrite = g_Config.bAlwaysDepthWrite;
 	bool enableStencilTest = !g_Config.bDisableStencilTest;
-	bool hackamasktest = g_Config.bHackAmaskTest;
 
 	// Dither
 	if (gstate.isDitherEnabled()) {
@@ -421,10 +420,6 @@ void TransformDrawEngine::ApplyDrawState(int prim) {
 			}
 		}
 		amask = true;
-		if (hackamasktest){
-			// Hack setting for Blue fog and Shadow issues in the 3rd birthday.
-			amask = true;
-		}
 		glstate.colorMask.set(rmask, gmask, bmask, amask);
 
 		// Stencil Test

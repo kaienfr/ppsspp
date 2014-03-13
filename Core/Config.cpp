@@ -389,8 +389,6 @@ static ConfigSetting graphicsSettings[] = {
 	ConfigSetting("VSyncInterval", &g_Config.bVSync, false),
 	ReportedConfigSetting("DisableStencilTest", &g_Config.bDisableStencilTest, false),
 	ReportedConfigSetting("AlwaysDepthWrite", &g_Config.bAlwaysDepthWrite, false),
-	ReportedConfigSetting("HackAmaskTest", &g_Config.bHackAmaskTest, false),
-
 
 	// Not really a graphics setting...
 	ReportedConfigSetting("TimerHack", &g_Config.bTimerHack, &DefaultTimerHack),
