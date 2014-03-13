@@ -18,6 +18,17 @@ For the latest source code, see [our github page](https://github.com/hrydgard/pp
 
 For build instructions and other development tutorials, see the [wiki](https://github.com/hrydgard/ppsspp/wiki).
 
+Build instruction for iOS
+-------------------------
+1. In PPSSPP folder, type 
+```
+> ./b.sh --ios
+```
+2. Using xcode to open the project file in build-ios folder
+3. Choose debug mode in xcode on the target PPSSPP if you want debug, set code-signing of the Debug mode to "iPhone Developper", connect to your device, build and debug. 
+
+If you are missing some libs, e.x.:"stdlib", just add it to your link libs. Good luck! 
+
 What's new in 0.9.7.1
 ---------------------
 * Some critical bugfixes (rotation, haptic feedback on Android, etc)
