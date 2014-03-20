@@ -223,7 +223,7 @@ void AudioClose(SimpleAudio **ctx) {
 #endif  // USE_FFMPEG
 }
 
-bool isValideCodec(int codec){
+bool isValidCodec(int codec){
 	if (codec >= PSP_CODEC_AT3PLUS && codec <= PSP_CODEC_AAC) {
 		return true;
 	}
