@@ -84,8 +84,8 @@ int sceAudiocodecGetEDRAM(u32 ctxPtr, int codec) {
 }
 
 int sceAudiocodecReleaseEDRAM(u32 ctxPtr, int id) {
-	AudioClose(&audio);
 	//id is not always a codec, so what is should be exactly? 
+	//AudioClose(&audio); can not be used here, since it will crash some games.
 	WARN_LOG(ME, "UNIMPL sceAudiocodecReleaseEDRAM(%08x, %i)", ctxPtr, id);
 	return 0;
 }
