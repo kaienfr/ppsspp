@@ -24,6 +24,7 @@
 #include <codecvt>
 #endif
 
+#include "math/math_util.h"
 #include "native/thread/thread.h"
 #include "native/thread/threadutil.h"
 #include "native/base/mutex.h"
@@ -54,6 +55,7 @@
 #include "Core/ELF/ParamSFO.h"
 #include "Core/SaveState.h"
 #include "Common/LogManager.h"
+#include "Core/HLE/sceAudiocodec.h"
 
 #include "GPU/GPUState.h"
 #include "GPU/GPUInterface.h"
@@ -244,6 +246,8 @@ void CPU_Shutdown() {
 
 void CPU_RunLoop() {
 	setCurrentThreadName("CPUThread");
+	FPU_SetFastMode();
+
 	if (!CPU_NextState(CPU_THREAD_PENDING, CPU_THREAD_STARTING)) {
 		ERROR_LOG(CPU, "CPU thread in unexpected state: %d", cpuThreadState);
 		return;
@@ -411,6 +415,7 @@ void PSP_Shutdown() {
 		CPU_Shutdown();
 	}
 	GPU_Shutdown();
+	resetAudioList();
 	host->SetWindowTitle(0);
 	currentMIPS = 0;
 	pspIsInited = false;
