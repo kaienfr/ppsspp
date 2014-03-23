@@ -112,8 +112,11 @@ enum {
 
 #define VERTEXCACHE_DECIMATION_INTERVAL 17
 
+enum { VAI_KILL_AGE = 120 };
+
+
 TransformDrawEngine::TransformDrawEngine()
-	: collectedVerts(0),
+	: decodedVerts_(0),
 		prevPrim_(GE_PRIM_INVALID),
 		dec_(0),
 		lastVType_(-1),
@@ -262,6 +265,11 @@ void TransformDrawEngine::SetupVertexDecoder(u32 vertType) {
 	if (vertTypeID != lastVType_) {
 		dec_ = GetVertexDecoder(vertTypeID);
 		lastVType_ = vertTypeID;
+
+		// TODO: Add functionality to VertexDecoder to scan for non-full alpha in the two other formats,
+		// which are quite common.
+		int colorType = vertTypeID & GE_VTYPE_COL_MASK;
+		gstate_c.vertexFullAlpha = colorType == GE_VTYPE_COL_NONE || colorType == GE_VTYPE_COL_565;
 	}
 }
 
@@ -325,15 +333,15 @@ void TransformDrawEngine::SubmitPrim(void *verts, void *inds, GEPrimitiveType pr
 	dc.vertexCount = vertexCount;
 
 	u32 dhash = dcid_;
-	dhash ^= (u32)(uintptr_t)dc.verts;
+	dhash ^= (u32)(uintptr_t)verts;
 	dhash = __rotl(dhash, 13);
-	dhash ^= (u32)(uintptr_t)dc.inds;
+	dhash ^= (u32)(uintptr_t)inds;
 	dhash = __rotl(dhash, 13);
-	dhash ^= (u32)dc.vertType;
+	dhash ^= (u32)vertType;
 	dhash = __rotl(dhash, 13);
-	dhash ^= (u32)dc.vertexCount;
+	dhash ^= (u32)vertexCount;
 	dhash = __rotl(dhash, 13);
-	dhash ^= (u32)dc.prim;
+	dhash ^= (u32)prim;
 	dcid_ = dhash;
 
 	if (inds) {
@@ -380,16 +388,16 @@ void TransformDrawEngine::DecodeVertsStep() {
 
 	const DeferredDrawCall &dc = drawCalls[i];
 
-	indexGen.SetIndex(collectedVerts);
+	indexGen.SetIndex(decodedVerts_);
 	int indexLowerBound = dc.indexLowerBound, indexUpperBound = dc.indexUpperBound;
 
 	u32 indexType = dc.indexType;
 	void *inds = dc.inds;
 	if (indexType == GE_VTYPE_IDX_NONE >> GE_VTYPE_IDX_SHIFT) {
 		// Decode the verts and apply morphing. Simple.
-		dec_->DecodeVerts(decoded + collectedVerts * (int)dec_->GetDecVtxFmt().stride,
+		dec_->DecodeVerts(decoded + decodedVerts_ * (int)dec_->GetDecVtxFmt().stride,
 			dc.verts, indexLowerBound, indexUpperBound);
-		collectedVerts += indexUpperBound - indexLowerBound + 1;
+		decodedVerts_ += indexUpperBound - indexLowerBound + 1;
 		indexGen.AddPrim(dc.prim, dc.vertexCount);
 	} else {
 		// It's fairly common that games issue long sequences of PRIM calls, with differing
@@ -427,9 +435,9 @@ void TransformDrawEngine::DecodeVertsStep() {
 
 		int vertexCount = indexUpperBound - indexLowerBound + 1;
 		// 3. Decode that range of vertex data.
-		dec_->DecodeVerts(decoded + collectedVerts * (int)dec_->GetDecVtxFmt().stride,
+		dec_->DecodeVerts(decoded + decodedVerts_ * (int)dec_->GetDecVtxFmt().stride,
 			dc.verts, indexLowerBound, indexUpperBound);
-		collectedVerts += vertexCount;
+		decodedVerts_ += vertexCount;
 
 		// 4. Advance indexgen vertex counter.
 		indexGen.Advance(vertexCount);
@@ -475,8 +483,6 @@ u32 TransformDrawEngine::ComputeHash() {
 
 	return fullhash;
 }
-
-enum { VAI_KILL_AGE = 120 };
 
 void TransformDrawEngine::ClearTrackedVertexArrays() {
 	for (auto vai = vai_.begin(); vai != vai_.end(); vai++) {
@@ -722,7 +728,7 @@ rotateVBO:
 	}
 
 	indexGen.Reset();
-	collectedVerts = 0;
+	decodedVerts_ = 0;
 	numDrawCalls = 0;
 	vertexCountInDrawCalls = 0;
 	decodeCounter_ = 0;
