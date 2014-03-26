@@ -1381,9 +1381,8 @@ namespace MainWindow
 						MessageBoxA(hWnd, errorMessage, "Error", MB_OK);
 						break;
 					}
-
 					if (!Core_IsStepping()) Core_EnableStepping(true); // If emulator isn't paused force paused state
-					fwrite(Memory::GetPointer(0x08800000), 1, 0x03800000, output);
+					fwrite(Memory::GetPointer(PSP_GetUserMemoryBase()), 1, PSP_GetUserMemoryEnd()-PSP_GetUserMemoryBase(), output);
 					fclose(output);
 					MessageBoxA(hWnd, "RAM.dump Done.", "Information", MB_OK); 
 					Core_EnableStepping(false); // resume emulation.
