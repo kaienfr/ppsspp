@@ -35,7 +35,7 @@ struct AudioCodecContext {
 };
 
 // audioList is to store current playing audios.
-std::list<SimpleAudio *> audioList;
+static std::list<SimpleAudio *> audioList;
 
 // find the audio decoder for corresponding ctxPtr in audioList
 SimpleAudio * findDecoder(u32 ctxPtr){
@@ -114,7 +114,6 @@ int sceAudiocodecGetEDRAM(u32 ctxPtr, int codec) {
 }
 
 int sceAudiocodecReleaseEDRAM(u32 ctxPtr, int id) {
-	//id is not always a codec, so what is should be? 
 	if (removeDecoder(ctxPtr)){
 		INFO_LOG(ME, "sceAudiocodecReleaseEDRAM(%08x, %i)", ctxPtr, id);
 		return 0;
@@ -143,38 +142,38 @@ void __sceAudiocodecDoState(PointerWrap &p){
 	if (!s)
 		return;
 
-	/*
 	auto count = (int)audioList.size();
 	p.Do(count);
-	if (p.mode == p.MODE_WRITE && count > 0){
-		// savestate if audioList is nonempty
-		auto codec_ = new int[count];
-		auto ctxPtr_ = new u32[count];
-		int i = 0;
-		for (std::list<SimpleAudio *>::iterator it = audioList.begin(); it != audioList.end(); it++){
-			codec_[i] = (*it)->audioType;
-			ctxPtr_[i] = (*it)->ctxPtr;
-			i++;
+	if (count > 0){
+		if (p.mode == p.MODE_READ){
+			// loadstate if audioList is nonempty
+			auto codec_ = new int[count];
+			auto ctxPtr_ = new u32[count];
+			p.DoArray(codec_, ARRAY_SIZE(codec_));
+			p.DoArray(ctxPtr_, ARRAY_SIZE(ctxPtr_));
+			for (int i = 0; i < count; i++){
+				auto decoder = new SimpleAudio(ctxPtr_[i], codec_[i]);
+				audioList.push_front(decoder);
+			}
+			delete[] codec_;
+			delete[] ctxPtr_;
 		}
-		p.DoArray(codec_, count);
-		p.DoArray(ctxPtr_, count);
-		delete[] codec_;
-		delete[] ctxPtr_;
-	}
-	if (p.mode == p.MODE_READ && count > 0){
-		// loadstate if audioList is nonempty
-		auto codec_ = new int[count];
-		auto ctxPtr_ = new u32[count];
-		p.DoArray(codec_, count);
-		p.DoArray(ctxPtr_, count);
-		for (int i = 0; i < count; i++){
-			auto decoder = new SimpleAudio(ctxPtr_[i], codec_[i]);
-			audioList.push_front(decoder);
+		else{
+			// savestate if audioList is nonempty
+			auto codec_ = new int[count];
+			auto ctxPtr_ = new u32[count];
+			int i = 0;
+			for (std::list<SimpleAudio *>::iterator it = audioList.begin(); it != audioList.end(); it++){
+				codec_[i] = (*it)->audioType;
+				ctxPtr_[i] = (*it)->ctxPtr;
+				i++;
+			}
+			p.DoArray(codec_, ARRAY_SIZE(codec_));
+			p.DoArray(ctxPtr_, ARRAY_SIZE(ctxPtr_));
+			delete[] codec_;
+			delete[] ctxPtr_;
 		}
-		delete[] codec_;
-		delete[] ctxPtr_;
 	}
-	*/
 }
 
 void resetAudioList(){
