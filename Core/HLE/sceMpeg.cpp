@@ -127,6 +127,19 @@ struct StreamInfo {
 	bool needsReset;
 };
 
+// Video source
+static u32 pVideoSource;
+static int m_nbpackets;
+static int iSize;
+
+struct SceMpegLLI
+{
+	u32 pSrc;
+	u32 pDst;
+	u32 Next;
+	int iSize;
+};
+
 typedef std::map<u32, StreamInfo> StreamInfoMap;
 
 // Internal structure
@@ -343,7 +356,7 @@ void __MpegInit() {
 	streamIdGen = 1;
 	actionPostPut = __KernelRegisterActionType(PostPutAction::Create);
 
-#ifdef USING_FFMPEG
+#ifdef USE_FFMPEG
 	avcodec_register_all();
 	av_register_all();
 #endif
@@ -685,8 +698,47 @@ int sceMpegFreeAvcEsBuf(u32 mpeg, int esBuf)
 	return 0;
 }
 
+bool decodePmpVideo(PSPPointer<SceMpegRingBuffer> ringbuffer, MpegContext * ctx){
+	if (Memory::IsValidAddress(pVideoSource)){
+		SceMpegLLI lli;
+		auto p = pVideoSource;
+		// Create BufferQueue
+		if (!ctx->mediaengine->m_pdata){
+			ctx->mediaengine->m_pdata = new BufferQueue();
+		}
+		while (1){
+			Memory::ReadStruct(pVideoSource, &lli);
+			// add source to bufferqueue
+			ctx->mediaengine->m_pdata->push(Memory::GetPointer(lli.pSrc), lli.iSize);
+			if (lli.Next == 0){
+				break;
+			}
+			p = p + sizeof(SceMpegLLI);
+		}
+		// initialize media engine parameters
+		ctx->mediaengine->m_mpegheaderReadPos = 0;
+		ctx->mediaengine->m_decodingsize = 0;
+		ctx->mediaengine->m_pFormatCtx = avformat_alloc_context();
+
+		AVCodec * pCodec = avcodec_find_decoder(CODEC_ID_H264);
+
+		ctx->mediaengine->openContext();
+		ringbuffer->packetsRead = m_nbpackets;
+		return true;
+	}
+	// not a pmp video, return false
+	return false;
+}
+
+
 u32 sceMpegAvcDecode(u32 mpeg, u32 auAddr, u32 frameWidth, u32 bufferAddr, u32 initAddr)
 {
+	WARN_LOG(ME, "sceMpegAvcDecode(%08x, %08x, %d, %08x, %08x)", mpeg, auAddr, frameWidth, bufferAddr, initAddr);
+	auto pc_mpeg = Memory::GetPointer(mpeg); // mpeg ctx
+	auto pc_au = Memory::GetPointer(auAddr); // audio addr
+	auto pc_buffer = Memory::GetPointer(bufferAddr); // output buffer
+	auto pc_init = Memory::GetPointer(initAddr); // no use
+
 	MpegContext *ctx = getMpegCtx(mpeg);
 	if (!ctx) {
 		WARN_LOG(ME, "sceMpegAvcDecode(%08x, %08x, %d, %08x, %08x): bad mpeg handle", mpeg, auAddr, frameWidth, bufferAddr, initAddr);
@@ -704,10 +756,18 @@ u32 sceMpegAvcDecode(u32 mpeg, u32 auAddr, u32 frameWidth, u32 bufferAddr, u32 i
 	SceMpegAu avcAu;
 	avcAu.read(auAddr);
 
+	
+	SceMpegRingBuffer rr;
+	Memory::ReadStruct(ctx->mpegRingbufferAddr, &rr);
 	auto ringbuffer = PSPPointer<SceMpegRingBuffer>::Create(ctx->mpegRingbufferAddr);
 	if (!ringbuffer.IsValid()) {
 		ERROR_LOG(ME, "Bogus mpegringbufferaddr");
 		return -1;
+	}
+	
+	// try to check and decode pmp video
+	if (decodePmpVideo(ringbuffer, ctx)){
+		INFO_LOG(ME, "Using ffmpeg to decode pmp video");
 	}
 
 	if (ringbuffer->packetsRead == 0 || ctx->mediaengine->IsVideoEnd()) {
@@ -1794,26 +1854,32 @@ void Register_sceMpeg()
 	RegisterModule("sceMpeg", ARRAY_SIZE(sceMpeg), sceMpeg);
 }
 
-struct SceMpegLLI
+u32 sceMpegbase_BEA18F91(u32 p, u32 pSrc, u32 iSize, u32 unk4, u32 unk5)
 {
-	u32 pSrc;
-	u32 pDst;
-	u32 Next;
-	int iSize;
-};
-
-u32 sceMpegbase_BEA18F91(u32 p)
-{
+	ERROR_LOG(ME, "UNIMPL sceMpegbase_BEA18F91(%08x,%08x,%08x,%08x,%08x)", p, pSrc,iSize,unk4,unk5);
+	pVideoSource = p;
+	m_nbpackets = 0;
 	SceMpegLLI lli;
-	Memory::ReadStruct(p, &lli);
+	while (1){
+		Memory::ReadStruct(p, &lli);
+		auto pc_lli = Memory::GetPointer(p);
+		auto pc_pSrc = Memory::GetPointer(lli.pSrc);
+		m_nbpackets++;
+		if (lli.Next == 0){
+			break;
+		}
+		p = p + sizeof(SceMpegLLI);
+	}
+
 	//TODO:  
-	ERROR_LOG(ME, "UNIMPL sceMpegbase_BEA18F91(%08x)", p);
+	
+	ERROR_LOG(ME, "UNIMPL sceMpegbase_BEA18F91(%08x) pSrc %08x , pDst %08x, Next %08x, iSize %08x", p, lli.pSrc, lli.pDst ,lli.Next, lli.iSize);
 	return 0;
 }
 
 const HLEFunction sceMpegbase[] =
 {
-	{ 0xBEA18F91, WrapU_U<sceMpegbase_BEA18F91>, "sceMpegbase_BEA18F91" },
+	{ 0xBEA18F91, WrapU_UUUUU<sceMpegbase_BEA18F91>, "sceMpegbase_BEA18F91" },
 	{ 0x492B5E4B, 0, "sceMpegBaseCscInit" },
 	{ 0x0530BE4E, 0, "sceMpegbase_0530BE4E" },
 	{ 0x91929A21, 0, "sceMpegBaseCscAvc" },
