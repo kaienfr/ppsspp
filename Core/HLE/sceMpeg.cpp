@@ -89,7 +89,7 @@ static const int MPEG_HEADER_BUFFER_MINIMUM_SIZE = 2048;
 static u32 pmp_videoSource = 0; //pointer to the video source (SceMpegLLi structure) 
 static int pmp_nBlocks = 0; //number of blocks received in the last sceMpegbase_BEA18F91 call
 static std::list<AVFrame*> pmp_queue; //list of pmp video frames have been decoded and will be played
-static std::list<void *> pmp_ContextList; //list of pmp media contexts
+static std::list<u32> pmp_ContextList; //list of pmp media contexts
 static bool pmp_oldStateLoaded = false; // for dostate
 
 #ifdef USE_FFMPEG 
@@ -732,9 +732,9 @@ static void SaveFrame(AVFrame *pFrame, int width, int height)
 }
 
 // check the existence of pmp media context 
-bool isContextExist(void* ctx){
-	for (std::list<void*>::iterator it = pmp_ContextList.begin(); it != pmp_ContextList.end(); it++){
-		if (*it == ctx){
+bool isContextExist(u32 ctxAddr){
+	for (std::list<u32>::iterator it = pmp_ContextList.begin(); it != pmp_ContextList.end(); it++){
+		if (*it == ctxAddr){
 			return true;
 		}
 	}
@@ -813,19 +813,102 @@ bool InitPmp(MpegContext * ctx){
 #endif
 }
 
+class H264Frames{
+public:
+	int size;
+	u8* stream;
+	
+	H264Frames() :size(0), stream(NULL){};
+	
+	H264Frames(u8* str, int sz) :size(sz){
+		stream = new u8[size];
+		memcpy(stream, str, size);
+	};
+
+	H264Frames(H264Frames *frame){
+		size = frame->size;
+		stream = new u8[size];
+		memcpy(stream, frame->stream, size);
+	};
+
+	~H264Frames(){
+		size = 0;
+		if (stream){
+			delete[] stream;
+			stream = NULL;
+		}
+	};
+	
+	void add(H264Frames *p){
+		add(p->stream, p->size);
+	};
+
+	void add(u8* str, int sz){
+		int newsize = size + sz;
+		auto newstream = new u8[newsize];
+		// join two streams
+		memcpy(newstream, stream, size);
+		memcpy(newstream + size, str, sz);
+		// delete old stream
+		if (stream)
+			delete[] stream;
+		// replace with new stream
+		stream = newstream;
+		size = newsize;
+	};
+
+	void remove(int pos){
+		// remove stream from begining to pos
+		if (pos == 0){
+			// nothing to remove
+		}
+		else if (pos >= size){
+			// we remove all
+			size = 0;
+			if (stream){
+				delete[] stream;
+				stream = NULL;
+			}
+		}
+		else{
+			// we remove the front part
+			size -= pos;
+			auto str = new u8[size];
+			memcpy(str, stream + pos, size);
+			delete[] stream;
+			stream = str;
+		}
+	};
+#ifndef USE_FFMPEG
+#define FF_INPUT_BUFFER_PADDING_SIZE 16
+#endif
+	void addpadding(){
+		auto str = new u8[size + FF_INPUT_BUFFER_PADDING_SIZE];
+		memcpy(str, stream, size);
+		memset(str + size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+		size += FF_INPUT_BUFFER_PADDING_SIZE;
+		delete[] stream;
+		stream = str;
+	}
+};
+
+// collect pmp video frames
+static H264Frames *pmpframes = new H264Frames();
+
 // decode pmp video to RGBA format
-bool decodePmpVideo(PSPPointer<SceMpegRingBuffer> ringbuffer, MpegContext * ctx){
+bool decodePmpVideo(PSPPointer<SceMpegRingBuffer> ringbuffer, u32 pmpctxAddr){
 	// the current video is pmp iff pmp_videoSource is a valide addresse
+	auto ctx = getMpegCtx(pmpctxAddr);
 	if (Memory::IsValidAddress(pmp_videoSource)){
 		// We should initialize pmp codec for each pmp context
-		if (isContextExist((void*)ctx) == false){
+		if (isContextExist(pmpctxAddr) == false){
 			auto ret = InitPmp(ctx);
 			if (!ret){
 				ERROR_LOG(ME, "Pmp video initialization failed");
 				return false;
 			}
 			// add the initialized context into ContextList
-			pmp_ContextList.push_front((void*)ctx);
+			pmp_ContextList.push_front(pmpctxAddr);
 		}
 
 		ringbuffer->packetsRead = pmp_nBlocks;
@@ -835,75 +918,79 @@ bool decodePmpVideo(PSPPointer<SceMpegRingBuffer> ringbuffer, MpegContext * ctx)
 		auto pFrameRGB = mediaengine->m_pFrameRGB;
 		auto pCodecCtx = mediaengine->m_pCodecCtxs[0];
 
-		// decode all blocks
+		// joint all blocks into H264Frames
 		SceMpegLLI lli;
 		for (int i = 0; i < pmp_nBlocks; i++){
 			Memory::ReadStruct(pmp_videoSource, &lli);
-
-			// initialize packet
-			AVPacket packet;
-			av_new_packet(&packet, pCodecCtx->width*pCodecCtx->height);
-
-			// set packet to source block
-			packet.data = Memory::GetPointer(lli.pSrc);
-			packet.size = lli.iSize;
-
-			// reuse pFrame and pFrameRGB
-			int got_picture = 0;
-			av_frame_unref(pFrame);
-			av_frame_unref(pFrameRGB);
-
-			// hook pFrameRGB output to buffer
-			avpicture_fill((AVPicture *)pFrameRGB, mediaengine->m_buffer, pmp_want_pix_fmt, pCodecCtx->width, pCodecCtx->height);
-
-			// decode video frame
-			auto len = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
-			DEBUG_LOG(ME, "got_picture %d", got_picture);
-			if (got_picture){
-				SwsContext *img_convert_ctx = NULL;
-				img_convert_ctx = sws_getContext(
-					pCodecCtx->width,
-					pCodecCtx->height,
-					pCodecCtx->pix_fmt,
-					pCodecCtx->width,
-					pCodecCtx->height,
-					pmp_want_pix_fmt,
-					SWS_BILINEAR,
-					NULL, NULL, NULL);
-
-				if (!img_convert_ctx) {
-					ERROR_LOG(ME, "Cannot initialize sws conversion context");
-					return false;
-				}
-
-				// Convert to RGBA
-				int swsRet = sws_scale(img_convert_ctx, (const uint8_t* const*)pFrame->data,
-					pFrame->linesize, 0, pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
-				if (swsRet < 0){
-					ERROR_LOG(ME, "sws_scale: Error while converting %d", swsRet);
-					return false;
-				}
-
-				// update timestamp
-				if (av_frame_get_best_effort_timestamp(mediaengine->m_pFrame) != AV_NOPTS_VALUE)
-					mediaengine->m_videopts = av_frame_get_best_effort_timestamp(mediaengine->m_pFrame) + av_frame_get_pkt_duration(mediaengine->m_pFrame) - mediaengine->m_firstTimeStamp;
-				else
-					mediaengine->m_videopts += av_frame_get_pkt_duration(mediaengine->m_pFrame);
-
-				// push the decoded frame into pmp_queue
-				pmp_queue.push_back(pFrameRGB);
-
-				// write frame into ppm file
-				// SaveFrame(pNewFrameRGB, pCodecCtx->width, pCodecCtx->height);
-
-				// free some pointers 
-				sws_freeContext(img_convert_ctx);
-				av_free_packet(&packet);
-
-				// get next block
-				pmp_videoSource += sizeof(SceMpegLLI);
-			}
+			// add source block into pmpframes
+			pmpframes->add(Memory::GetPointer(lli.pSrc), lli.iSize);
+			// get next block
+			pmp_videoSource += sizeof(SceMpegLLI);
 		}
+
+		pmpframes->addpadding();
+
+		// initialize packet
+		AVPacket packet;
+		av_new_packet(&packet, pCodecCtx->width*pCodecCtx->height);
+
+		// set packet to source block
+		packet.data = pmpframes->stream;
+		packet.size = pmpframes->size;
+
+		// reuse pFrame and pFrameRGB
+		int got_picture = 0;
+		av_frame_unref(pFrame);
+		av_frame_unref(pFrameRGB);
+
+		// hook pFrameRGB output to buffer
+		avpicture_fill((AVPicture *)pFrameRGB, mediaengine->m_buffer, pmp_want_pix_fmt, pCodecCtx->width, pCodecCtx->height);
+
+		// decode video frame
+		auto len = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
+		DEBUG_LOG(ME, "got_picture %d", got_picture);
+		if (got_picture){
+			SwsContext *img_convert_ctx = NULL;
+			img_convert_ctx = sws_getContext(
+				pCodecCtx->width,
+				pCodecCtx->height,
+				pCodecCtx->pix_fmt,
+				pCodecCtx->width,
+				pCodecCtx->height,
+				pmp_want_pix_fmt,
+				SWS_BILINEAR,
+				NULL, NULL, NULL);
+
+			if (!img_convert_ctx) {
+				ERROR_LOG(ME, "Cannot initialize sws conversion context");
+				return false;
+			}
+
+			// Convert to RGBA
+			int swsRet = sws_scale(img_convert_ctx, (const uint8_t* const*)pFrame->data,
+				pFrame->linesize, 0, pCodecCtx->height, pFrameRGB->data, pFrameRGB->linesize);
+			if (swsRet < 0){
+				ERROR_LOG(ME, "sws_scale: Error while converting %d", swsRet);
+				return false;
+			}
+			// free sws context 
+			sws_freeContext(img_convert_ctx);
+
+			// update timestamp
+			if (av_frame_get_best_effort_timestamp(mediaengine->m_pFrame) != AV_NOPTS_VALUE)
+				mediaengine->m_videopts = av_frame_get_best_effort_timestamp(mediaengine->m_pFrame) + av_frame_get_pkt_duration(mediaengine->m_pFrame) - mediaengine->m_firstTimeStamp;
+			else
+				mediaengine->m_videopts += av_frame_get_pkt_duration(mediaengine->m_pFrame);
+
+			// push the decoded frame into pmp_queue
+			pmp_queue.push_back(pFrameRGB);
+
+			// write frame into ppm file
+			// SaveFrame(pNewFrameRGB, pCodecCtx->width, pCodecCtx->height);
+		}
+		// free some pointers
+		av_free_packet(&packet);
+		pmpframes->~H264Frames();
 		// must reset pmp_VideoSource address to zero after decoding. 
 		pmp_videoSource = 0;
 		return true;
@@ -925,6 +1012,9 @@ void __VideoPmpShutdown() {
 	}
 	pmp_queue.clear();
 	pmp_ContextList.clear();
+	if (pmpframes){
+		delete pmpframes;
+	}
 #endif
 }
 
@@ -975,7 +1065,7 @@ u32 sceMpegAvcDecode(u32 mpeg, u32 auAddr, u32 frameWidth, u32 bufferAddr, u32 i
 
 	// check and decode pmp video
 	bool ispmp = false;
-	if (decodePmpVideo(ringbuffer, ctx)){
+	if (decodePmpVideo(ringbuffer, mpeg)){
 		DEBUG_LOG(ME, "Using ffmpeg to decode pmp video");
 		ispmp = true;
 	}
@@ -1429,6 +1519,7 @@ u32 sceMpegFinish()
 		//return ERROR_MPEG_NOT_YET_INIT;
 	} else {
 		INFO_LOG(ME, "sceMpegFinish(...)");
+		__VideoPmpShutdown();
 	}
 	isMpegInit = false;
 	//__MpegFinish();
