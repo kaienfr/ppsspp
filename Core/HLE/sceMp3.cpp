@@ -212,16 +212,8 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 			// update the size of decoded data
 			ctx->bufferWrite = packet.pos;
 
-<<<<<<< HEAD
 			// count the total number of decoded samples
 			ctx->mp3SumDecodedSamples += frame->nb_samples * frame->channels;
-=======
-		fclose(file);
-	}
-	#endif
-	// 2 bytes per channel and we have frame.channels in mp3 source
-	ctx->mp3SumDecodedSamples += bytesdecoded / (2 * frame.channels);
->>>>>>> pmp_video_branch
 
 			// the output length
 			bytesdecoded += decoded_len;
