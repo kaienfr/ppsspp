@@ -473,7 +473,7 @@ bool MediaEngine::stepVideo(int videoPixelMode) {
 	// Update the linesize for the new format too.  We started with the largest size, so it should fit.
 	m_pFrameRGB->linesize[0] = getPixelFormatBytes(videoPixelMode) * m_desWidth;
 
-	AVPacket packet;
+	AVPacket packet = {0};
 	av_init_packet(&packet);
 	int frameFinished;
 	bool bGetFrame = false;
@@ -742,7 +742,7 @@ int MediaEngine::getAudioSamples(u32 bufferPtr) {
 	int outbytes = 0;
 
 	if (m_audioContext != NULL) {
-		if (!AudioDecode(m_audioContext, audioFrame, frameSize, &outbytes, buffer)) {
+		if (!m_audioContext->Decode(audioFrame, frameSize, buffer, &outbytes)) {
 			ERROR_LOG(ME, "Audio (%s) decode failed during video playback", GetCodecName(m_audioType));
 		}
 	}
