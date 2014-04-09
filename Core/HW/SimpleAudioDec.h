@@ -22,10 +22,6 @@
 #include "base/basictypes.h"
 #include "Core/HW/MediaEngine.h"
 
-#ifdef FAAD
-#include "faad2/include/faad.h"
-#endif
-
 #ifdef USE_FFMPEG
 
 extern "C" {
@@ -55,8 +51,6 @@ public:
 
 	bool Decode(void* inbuf, int inbytes, uint8_t *outbuf, int *outbytes);
 	bool IsOK() const { return codec_ != 0; }
-	void SimpleAudio::Resample(u8* inbuff, int in_samples, int64_t in_channel_layout, AVSampleFormat in_sample_fmt, int in_sample_rate, u8* outbuff, int out_samples);
-	void FAADInit();
 
 	u32 ctxPtr;
 	int audioType;
@@ -71,13 +65,6 @@ private:
 
 	bool GetAudioCodecID(int audioType); // Get audioCodecId from audioType
 #endif  // USE_FFMPEG
-
-#ifdef FAAD
-	#define BUFFER_MAX_LEN 1024*1024
-	NeAACDecHandle faad_decoder = 0;
-	NeAACDecConfigurationPtr faad_config;
-	u8* pcm_buff = new u8[BUFFER_MAX_LEN];
-#endif
 };
 
 
