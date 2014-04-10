@@ -194,12 +194,13 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 					break;
 				}
 				// always convert to stereo pcm 
-				__AdjustBGMVolume((s16 *)out, frame->nb_samples * 2);
+				int num_channels = 2;
+				__AdjustBGMVolume((s16 *)out, frame->nb_samples * num_channels);
 
 				// the decoded size
 				bytesdecoded += decoded;
-				// the output pcm size
-				bytespcm += ret * 2 * 2;
+				// the output pcm size, ret is number of output samples per channel, each sample 2 bytes 
+				bytespcm += ret * 2 * num_channels;
 				// the decoded source data size, always increasing even for looping
 				WARN_LOG(ME, "Decoded frames %d frame duaration %d", ctx->decoder_context->frame_number);
 				ctx->mp3DecodedBytes = packet.pos;
@@ -231,7 +232,7 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 	}
 #endif
 
-	// 2 bytes per channel and we have ctx->mp3Channels in mp3 source
+	// 2 bytes per sample per channel and we have ctx->mp3Channels in mp3 source
 	ctx->mp3SumDecodedSamples += bytesdecoded / (2 * ctx->mp3Channels);
 
 	DEBUG_LOG(ME, "%08x = sceMp3Decode(%08x,%08x)", bytespcm, mp3, outPcmPtr);
@@ -432,7 +433,7 @@ int __Mp3InitContext(Mp3Context *ctx) {
 		// audio hack to fix resampled pcm sample rate to 44100 (for voice speed issue as "Hanayaka Nari Wa ga Ichizoku")
 		want_sample_rate = 44100;
 	}
-	// always convert to PCM S16LE, 44100Hz, stereo
+	// always convert to PCM S16LE, stereo. The sample rate is chosen according audio hack setting on UI.
 	ctx->resampler_context = swr_alloc_set_opts(NULL,
 		AV_CH_LAYOUT_STEREO,
 		AV_SAMPLE_FMT_S16,
