@@ -149,9 +149,6 @@ void __Mp3DoState(PointerWrap &p) {
 }
 
 int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
-	//return number of bytes write into output pcm buffer, < 0 on error.
-	// For same latency reason, when all frames have been decoded, we can not return 0 immedialty
-	// we must waiting for the last part of voice until we have no longer frames.
 	Mp3Context *ctx = getMp3Ctx(mp3);
 	if (!ctx) {
 		ERROR_LOG(ME, "%s: bad mp3 handle %08x", __FUNCTION__, mp3);
@@ -159,76 +156,88 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 	}
 
 	int bytesdecoded = 0;
+	int bytespcm = 0;
 
 #ifndef USE_FFMPEG
 	Memory::Memset(ctx->mp3PcmBuf, 0, ctx->mp3PcmBufSize);
 	Memory::Write_U32(ctx->mp3PcmBuf, outPcmPtr);
 #else
-	AVFrame * frame = av_frame_alloc();
-	AVPacket packet;
-	av_init_packet(&packet);
-	int got_frame, ret;
-	// in order to avoid latency, we decode frame by frame
-	ret = av_read_frame(ctx->avformat_context, &packet);
-	if (ret < 0){
-		// if the all file is read, and we can not get a frame, then we return zero
-		if (ctx->readPosition >= ctx->mp3StreamEnd){
-			return 0;
-		}
-		else
-		{
-			ERROR_LOG(ME, "av_read_frame: no frame");
-			return -1;
-		}
-	}
+	AVFrame *frame = av_frame_alloc();
+	int got_frame = 0, ret;
+	static int audio_frame_count = 0;
 
-	if (packet.stream_index == ctx->audio_stream_index) {
-		av_frame_unref(frame);
-		got_frame = 0;
-		ret = avcodec_decode_audio4(ctx->decoder_context, frame, &got_frame, &packet);
-		if (ret < 0) {
-			ERROR_LOG(ME, "avcodec_decode_audio4: Error decoding audio, return %8x", ret);
-			return -1;
+	while (!got_frame) {
+		AVPacket packet;
+		av_init_packet(&packet);
+
+		if ((ret = av_read_frame(ctx->avformat_context, &packet)) < 0){
+			av_free_packet(&packet);
+			break;
 		}
-		if (got_frame) {
-			// decoded pcm length, this is the length before resampling
-			int decoded_len = av_samples_get_buffer_size(NULL, frame->channels, frame->nb_samples, (AVSampleFormat)frame->format, 0);
-
-			// set output buffer position
-			u8* out = Memory::GetPointer(ctx->mp3PcmBuf);
-
-			// convert to S16, stereo, PCM
-			ret = swr_convert(ctx->resampler_context, &out, frame->nb_samples, (const u8**)frame->extended_data, frame->nb_samples);
+		if (packet.stream_index == ctx->audio_stream_index) {
+			av_frame_unref(frame);
+			got_frame = 0;
+			ret = avcodec_decode_audio4(ctx->decoder_context, frame, &got_frame, &packet);
 			if (ret < 0) {
-				ERROR_LOG(ME, "swr_convert: Error while converting %8x", ret);
-				return -1;
+				ERROR_LOG(ME, "avcodec_decode_audio4: Error decoding audio %d", ret);
+				continue;
 			}
-			// always stereo
-			__AdjustBGMVolume((s16 *)out, frame->nb_samples * 2);
+			if (got_frame) {
+				int decoded = av_samples_get_buffer_size(NULL, frame->channels, frame->nb_samples, (AVSampleFormat)frame->format, 1);
 
-			// the output resampling pcm length is ret*2*converted_nb_channels, i.e. ret*2*2
-			decoded_len = ret * 2 * 2;
+				u8* out = Memory::GetPointer(ctx->mp3PcmBuf + bytesdecoded);
+				ret = swr_convert(ctx->resampler_context, &out, frame->nb_samples, (const u8**)frame->extended_data, frame->nb_samples);
+				if (ret < 0) {
+					ERROR_LOG(ME, "swr_convert: Error while converting %d", ret);
+					av_free_packet(&packet);
+					break;
+				}
+				// always convert to stereo pcm 
+				__AdjustBGMVolume((s16 *)out, frame->nb_samples * 2);
 
-			// update the size of decoded data
-			ctx->bufferWrite = packet.pos;
-
-			// count the total number of decoded samples
-			ctx->mp3SumDecodedSamples += frame->nb_samples * frame->channels;
-
-			// the output length
-			bytesdecoded += decoded_len;
-		} // end got_frame
-	}// end auido stream decoded and resampled
-	av_free_packet(&packet);
+				// the decoded size
+				bytesdecoded += decoded;
+				// the output pcm size
+				bytespcm += ret * 2 * 2;
+				// the decoded source data size, always increasing even for looping
+				ctx->mp3DecodedBytes = packet.pos;
+			}
+		}
+		av_free_packet(&packet);
+	} // end while
+	av_frame_free(&frame);
+	// if no decoded output, we don't need to play
+	if (bytesdecoded > 0){
+		Memory::Write_U32(ctx->mp3PcmBuf, outPcmPtr);
+	}
 #endif
-	Memory::Write_U32(ctx->mp3PcmBuf, outPcmPtr);
-	hleDelayResult(0, "sceMp3 decode", 200);
-	DEBUG_LOG(ME, "% 08x = sceMp3Decode(% 08x, % 08x)", bytesdecoded, mp3, outPcmPtr);
-	return bytesdecoded;
+
+#if 0 && defined(_DEBUG)
+	char fileName[256];
+	sprintf(fileName, "out.wav", mp3);
+
+	FILE * file = fopen(fileName, "a+b");
+	if (file) {
+		if (!Memory::IsValidAddress(ctx->mp3Buf)) {
+			ERROR_LOG(ME, "sceMp3Decode mp3Buf %08X is not a valid address!", ctx->mp3Buf);
+		}
+
+		//u8 * ptr = Memory::GetPointer(ctx->mp3Buf);
+		fwrite(Memory::GetPointer(ctx->mp3PcmBuf), 1, bytesdecoded, file);
+
+		fclose(file);
+	}
+#endif
+
+	// 2 bytes per channel and we have ctx->mp3Channels in mp3 source
+	ctx->mp3SumDecodedSamples += bytesdecoded / (2 * ctx->mp3Channels);
+
+	DEBUG_LOG(ME, "%08x = sceMp3Decode(%08x,%08x)", bytespcm, mp3, outPcmPtr);
+	return bytespcm;
 }
 
 int sceMp3ResetPlayPosition(u32 mp3) {
-	INFO_LOG(ME, "SceMp3ResetPlayPosition(%08x)", mp3);
+	DEBUG_LOG(ME, "SceMp3ResetPlayPosition(%08x)", mp3);
 
 	Mp3Context *ctx = getMp3Ctx(mp3);
 	if (!ctx) {
@@ -240,10 +249,8 @@ int sceMp3ResetPlayPosition(u32 mp3) {
 	return 0;
 }
 
-// check if we need to fill stream buffer via callback function readFunc
 int sceMp3CheckStreamDataNeeded(u32 mp3) {
-	// 1 if more stream data is needed, < 0 on error.
-	INFO_LOG(ME, "sceMp3CheckStreamDataNeeded(%08x)", mp3);
+	DEBUG_LOG(ME, "sceMp3CheckStreamDataNeeded(%08x)", mp3);
 
 	Mp3Context *ctx = getMp3Ctx(mp3);
 	if (!ctx) {
@@ -251,69 +258,80 @@ int sceMp3CheckStreamDataNeeded(u32 mp3) {
 		return -1;
 	}
 
-	// we do not need fill stream buffer if and only if the entire file is full filled.
-	// if the mp3Buf is full filled, we will overwrite it.
-	return ctx->readPosition < ctx->mp3StreamEnd;
+	return ctx->bufferAvailable != ctx->mp3BufSize && ctx->readPosition < ctx->mp3StreamEnd;
 }
 
-// this function will full fill buf of length buf_size, if it is not full filled, then it will read again
 static int readFunc(void *opaque, uint8_t *buf, int buf_size) {
 	Mp3Context *ctx = static_cast<Mp3Context*>(opaque);
-	DEBUG_LOG(ME, "Callback ffmpeg readFunc(ctx=%08x,buf=%08x,buf_size=%08x)", ctx, buf, buf_size);
+	int res = 0;
+	static int pbufpos = 0;
+	// if we still have available data in mp3Buf
+	if (ctx->bufferAvailable) {
+		// Maximum bytes we can read
+		int to_read = std::min(ctx->bufferAvailable, buf_size - pbufpos);
 
-	int toread = 0;
-	// we will fill buffer if we have not read full mp3 file
-	if (ctx->bufferRead < ctx->mp3StreamEnd){
-		// if we still have available buffer in mp3Buf
-		if (ctx->bufferAvailable > 0){
-			toread = std::min(buf_size, ctx->bufferAvailable + FF_INPUT_BUFFER_PADDING_SIZE);
-			// read from mp3Buff into buf
-			memcpy(buf, Memory::GetPointer(ctx->mp3Buf + ctx->bufferRead), toread - FF_INPUT_BUFFER_PADDING_SIZE);
-			// add padding into end, ffmpeg have alread load more space than buf_size with initial value 0xcd for padding
-			memset(buf + toread - FF_INPUT_BUFFER_PADDING_SIZE, 0, FF_INPUT_BUFFER_PADDING_SIZE);
-			ctx->bufferRead += toread;
-			ctx->bufferAvailable -= toread;
-		}
-		else{
-			// if no available buffer, we do nothing here and just waiting for mp3Buf being recharged. 
-			// bufferAvailable will be reset when new mp3Buf is recharged
-			return 0;
-		}
+		// Don't read past the end of mp3Buf if loops
+		to_read = std::min(ctx->mp3BufSize - ctx->bufferRead, to_read);
 
-		// in order to avoid recalling this function to read again and again when buf is not been full filled, we return buf_size to fake it. 
-		// in fact, if you haven't full fill the buf, that means you have either read all mp3 file or have no available mp3Buf
-		// and on both of the two cases, you don't need to read anymore. So just return buf_size is OK. 
-		return buf_size;
+		// we will fill the ffmpeg's buffer from the current position
+		memcpy(buf + pbufpos, Memory::GetCharPointer(ctx->mp3Buf + ctx->bufferRead), to_read);
+
+		ctx->bufferRead += to_read;
+		// if mp3Buf is full read, we reset the read position to its begining
+		if (ctx->bufferRead == ctx->mp3BufSize)
+			ctx->bufferRead = 0;
+		ctx->bufferAvailable -= to_read;
+		pbufpos += to_read;
+		// if ffmpeg buffer is full charged, we reset pointer to its begining
+		if (pbufpos == buf_size)
+			pbufpos = 0;
+		res = to_read;
+	} // otherwise, we have no data in mp3Buf
+	else {
+		ctx->bufferRead = 0;
+		ctx->bufferWrite = 0;
+		// if the mp3 file have not been all decoded, we should not stop but continue
+		// we can control the loops here. If the mp3 file has been fully decoded, then return zero to stop loops, return buf_size to continue loops.
+		int looped = ctx->mp3DecodedBytes / (ctx->mp3StreamEnd - ctx->mp3StreamStart); // number of time we have looped
+		if (ctx->mp3LoopNum == -1){ // if loop all the time
+			return res == 0 ? buf_size : res; // always looping
+		}
+		else if (ctx->mp3LoopNum > 0 && ctx->mp3LoopNum - looped < -1){ // if loop more than once
+			return 0; // stop playing immediately when number of loops reached 
+		}
+		else if (ctx->mp3LoopNum == 0 && looped == 0){ // only play once and still not stopped
+			// if res == 0, i.e. we have copied everything from mp3Buff to ffmpeg, but the decoding still not finished (maybe due to latency).
+			// Thus we can not return 0 to stop playing, we must return buf_size until the decoding is finishes (i.e., looped == 1).
+			return res == 0 ? buf_size : res;
+		}
 	}
-	else
-	{// all mp3 file have been decoded, we do not need to read anymore
-		return 0;
-	}
+	return res;
 }
 
 u32 sceMp3ReserveMp3Handle(u32 mp3Addr) {
-	INFO_LOG(ME, "sceMp3ReserveMp3Handle(%08x)", mp3Addr);
+	DEBUG_LOG(ME, "sceMp3ReserveMp3Handle(%08x)", mp3Addr);
 	Mp3Context *ctx = new Mp3Context;
 
 	memset(ctx, 0, sizeof(Mp3Context));
 
 	if (!Memory::IsValidAddress(mp3Addr)) {
 		WARN_LOG_REPORT(ME, "sceMp3ReserveMp3Handle(%08x): invalid address", mp3Addr)
-	}
-	else {
+	} else {
 		ctx->mp3StreamStart = Memory::Read_U64(mp3Addr);
 		ctx->mp3StreamEnd = Memory::Read_U64(mp3Addr + 8);
 		ctx->mp3Buf = Memory::Read_U32(mp3Addr + 16);
-		ctx->mp3BufSize = Memory::Read_U32(mp3Addr + 20); // >= 8192, according to pspsdk
+		ctx->mp3BufSize = Memory::Read_U32(mp3Addr + 20);
 		ctx->mp3PcmBuf = Memory::Read_U32(mp3Addr + 24);
-		ctx->mp3PcmBufSize = Memory::Read_U32(mp3Addr + 28); // >=9216, according to pspsdk
+		ctx->mp3PcmBufSize = Memory::Read_U32(mp3Addr + 28);
 	}
 	ctx->readPosition = ctx->mp3StreamStart;
+	ctx->mp3MaxSamples = ctx->mp3PcmBufSize / 4;
 	ctx->mp3DecodedBytes = 0;
 	ctx->mp3SumDecodedSamples = 0;
-	ctx->bufferAvailable = 0; // occupied buffer size in mp3Buf
-	ctx->bufferRead = 0; // total size of buffer read from mp3Buf into ffmpeg
-	ctx->bufferWrite = 0; // total size of buffer decoded in ffmpeg. 
+	ctx->mp3LoopNum = 0;
+	ctx->mp3Channels = 2;
+	ctx->mp3Bitrate = 128;
+	ctx->mp3SamplingRate = 44100;
 
 	if (mp3Map.find(mp3Addr) != mp3Map.end()) {
 		delete mp3Map[mp3Addr];
@@ -337,8 +355,9 @@ int sceMp3TermResource() {
 int __Mp3InitContext(Mp3Context *ctx) {
 #ifdef USE_FFMPEG
 	InitFFmpeg();
-	u8 *avio_buffer = static_cast<u8*>(av_malloc(ctx->mp3BufSize)); // sould include FF_INPUT_BUFFER_PADDING_SIZE
-	ctx->avio_context = avio_alloc_context(avio_buffer, ctx->mp3BufSize, 0, ctx, readFunc, NULL, NULL); //ctx->mp3BufSize
+	u8 *avio_buffer = (u8*)(av_malloc(ctx->mp3BufSize));
+
+	ctx->avio_context = avio_alloc_context(avio_buffer, ctx->mp3BufSize, 0, (void*)ctx, readFunc, NULL, NULL);
 	ctx->avformat_context = avformat_alloc_context();
 	ctx->avformat_context->pb = ctx->avio_context;
 
@@ -374,14 +393,7 @@ int __Mp3InitContext(Mp3Context *ctx) {
 		return -1;
 	}
 
-	// set parameters according to decoder_context
-	ctx->mp3Channels = ctx->decoder_context->channels;
-	ctx->mp3SamplingRate = ctx->decoder_context->sample_rate;
-	ctx->mp3Bitrate = ctx->decoder_context->bit_rate/1000;
-	ctx->mp3MaxSamples = ctx->mp3PcmBufSize / (2 * ctx->mp3Channels); // upper bound of samples number in pcm buffer
-
-	// always convert to PCM S16, 44100, stereo 
-	// fix sound issue for mono stereo etc
+	// always convert to PCM S16LE, 44100Hz, stereo
 	ctx->resampler_context = swr_alloc_set_opts(NULL,
 		AV_CH_LAYOUT_STEREO,
 		AV_SAMPLE_FMT_S16,
@@ -423,6 +435,13 @@ int sceMp3Init(u32 mp3) {
 	if (ret != 0)
 		return ret;
 
+	// Let's just grab this info from FFMPEG, it seems more reliable than the code above.
+
+	ctx->mp3SamplingRate = ctx->decoder_context->sample_rate;
+	ctx->mp3Channels = ctx->decoder_context->channels;
+	ctx->mp3Bitrate = ctx->decoder_context->bit_rate / 1000;
+	INFO_LOG(ME, "sceMp3Init(): channels=%i, samplerate=%ikHz, bitrate=%ikbps", ctx->mp3Channels, ctx->mp3SamplingRate, ctx->mp3Bitrate);
+	
 	av_dump_format(ctx->avformat_context, 0, "mp3", 0);
 #endif
 
@@ -453,13 +472,14 @@ int sceMp3GetMaxOutputSample(u32 mp3)
 }
 
 int sceMp3GetSumDecodedSample(u32 mp3) {
+	ERROR_LOG_REPORT(ME, "UNIMPL sceMp3GetSumDecodedSample(%08X)", mp3);
+
 	Mp3Context *ctx = getMp3Ctx(mp3);
 	if (!ctx) {
 		ERROR_LOG(ME, "%s: bad mp3 handle %08x", __FUNCTION__, mp3);
 		return -1;
 	}
 
-	DEBUG_LOG_REPORT(ME, "%08x = sceMp3GetSumDecodedSample(%08X)", ctx->mp3SumDecodedSamples, mp3);
 	return ctx->mp3SumDecodedSamples;
 }
 
@@ -511,11 +531,6 @@ int sceMp3GetSamplingRate(u32 mp3) {
 }
 
 int sceMp3GetInfoToAddStreamData(u32 mp3, u32 dstPtr, u32 towritePtr, u32 srcposPtr) {
-	/*	mp3 		- sceMp3 handle
-		dstPtr 		- Pointer to stream data buffer, here it sould be mp3Buf
-		towritePtr	- Free space in stream data buffer, mp3BufSize
-		srcposPtr 	- Position in source stream to start reading from
-		*/
 	INFO_LOG(ME, "sceMp3GetInfoToAddStreamData(%08X, %08X, %08X, %08X)", mp3, dstPtr, towritePtr, srcposPtr);
 
 	Mp3Context *ctx = getMp3Ctx(mp3);
@@ -524,36 +539,44 @@ int sceMp3GetInfoToAddStreamData(u32 mp3, u32 dstPtr, u32 towritePtr, u32 srcpos
 		return -1;
 	}
 
+	u32 buf, max_write;
+	if (ctx->readPosition < ctx->mp3StreamEnd) {
+		buf = ctx->mp3Buf + ctx->bufferWrite;
+		max_write = std::min(ctx->mp3BufSize - ctx->bufferWrite, ctx->mp3BufSize - ctx->bufferAvailable);
+	} else {
+		buf = 0;
+		max_write = 0;
+	}
+
 	if (Memory::IsValidAddress(dstPtr))
-		Memory::Write_U32(ctx->mp3Buf, dstPtr); // stream data buffer is always mp3Buf
+		Memory::Write_U32(buf, dstPtr);
 	if (Memory::IsValidAddress(towritePtr))
-		Memory::Write_U32(ctx->mp3BufSize, towritePtr); // the available space in stream data buffer is the buff size
+		Memory::Write_U32(max_write, towritePtr);
 	if (Memory::IsValidAddress(srcposPtr))
-		Memory::Write_U32(ctx->readPosition, srcposPtr); // readPosition
+		Memory::Write_U32(ctx->readPosition, srcposPtr);
 
 	return 0;
 }
 
-//Notify about how much we really read from source file.
-//size is what we really read from source file
 int sceMp3NotifyAddStreamData(u32 mp3, int size) {
+	INFO_LOG(ME, "sceMp3NotifyAddStreamData(%08X, %i)", mp3, size);
+
 	Mp3Context *ctx = getMp3Ctx(mp3);
 	if (!ctx) {
 		ERROR_LOG(ME, "%s: bad mp3 handle %08x", __FUNCTION__, mp3);
 		return -1;
 	}
 
+	ctx->readPosition += size;
+	ctx->bufferAvailable += size;
+	ctx->bufferWrite += size;
 
-	ctx->readPosition += size; // the pointer to the source file is moved
-	ctx->bufferAvailable += size; // the size of occupied buffer in mp3Buff is increased
+	if (ctx->bufferWrite >= ctx->mp3BufSize)
+		ctx->bufferWrite %= ctx->mp3BufSize;
 
-	if (ctx->readPosition >= ctx->mp3StreamEnd && ctx->mp3LoopNum != 0) {
+	if (ctx->readPosition >= ctx->mp3StreamEnd) {
 		ctx->readPosition = ctx->mp3StreamStart;
-		if (ctx->mp3LoopNum > 0)
-			ctx->mp3LoopNum--;
 	}
-
-	INFO_LOG(ME, "sceMp3NotifyAddStreamData(%08x, %08x)", mp3, size);
 	return 0;
 }
 
@@ -567,7 +590,6 @@ int sceMp3ReleaseMp3Handle(u32 mp3) {
 	}
 
 	mp3Map.erase(mp3Map.find(mp3));
-
 	delete ctx;
 
 	return 0;
