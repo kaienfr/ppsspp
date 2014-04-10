@@ -180,6 +180,7 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 			ret = avcodec_decode_audio4(ctx->decoder_context, frame, &got_frame, &packet);
 			if (ret < 0) {
 				ERROR_LOG(ME, "avcodec_decode_audio4: Error decoding audio %d", ret);
+				av_free_packet(&packet);
 				continue;
 			}
 			if (got_frame) {
@@ -200,6 +201,7 @@ int sceMp3Decode(u32 mp3, u32 outPcmPtr) {
 				// the output pcm size
 				bytespcm += ret * 2 * 2;
 				// the decoded source data size, always increasing even for looping
+				WARN_LOG(ME, "Decoded frames %d frame duaration %d", ctx->decoder_context->frame_number);
 				ctx->mp3DecodedBytes = packet.pos;
 			}
 		}
