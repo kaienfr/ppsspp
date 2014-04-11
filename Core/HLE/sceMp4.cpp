@@ -286,7 +286,10 @@ u32 sceAacInit(u32 id)
 	aac->decoder = new SimpleAudio(PSP_CODEC_AAC);
 
 	// close the audio if id already exist.
-	sceAacExit(id);
+	if (aacMap.find(id) != aacMap.end()) {
+		delete aacMap[id];
+		aacMap.erase(id);
+	}
 
 	aacMap[id] = aac;
 
