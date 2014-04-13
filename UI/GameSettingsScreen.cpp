@@ -248,10 +248,8 @@ void GameSettingsScreen::CreateViews() {
 	CheckBox *lowAudio = audioSettings->Add(new CheckBox(&g_Config.bLowLatencyAudio, a->T("Low latency audio")));
 	lowAudio->SetEnabledPtr(&g_Config.bEnableSound);
 
-	// Audio Hacks
-	audioSettings->Add(new ItemHeader(gs->T("Audio Hacks")));
-	audioSettings->Add(new CheckBox(&g_Config.bFixSampleRate, gs->T("Mp3 Sample Rate fixed to 44100Hz (fast voice)")));
-	audioSettings->Add(new CheckBox(&g_Config.bFFmpegCallback, gs->T("Fix mp3 loop issues (e.g Miku)")));
+	audioSettings->Add(new ItemHeader(ms->T("Audio hacks")));
+	audioSettings->Add(new CheckBox(&g_Config.bSoundSpeedHack, a->T("Sound speed hack (DOA etc.)")));
 
 	// Control
 	ViewGroup *controlsSettingsScroll = new ScrollView(ORIENT_VERTICAL, new LinearLayoutParams(FILL_PARENT, FILL_PARENT));
