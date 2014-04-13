@@ -330,6 +330,11 @@ int sceMp3Init(u32 mp3) {
 	if (ctx->freq == 48000){
 		ctx->decoder->setResampleFrequency(ctx->freq);
 	}
+	if (ctx->SamplingRate == 32000){
+		ctx->decoder->ResetCodecCtx(ctx->Channels, ctx->SamplingRate, ctx->BitRate);
+		ctx->Channels = 2;
+		ctx->SamplingRate = 44100;
+	}
 
 	// For mp3 file, if ID3 tag is detected, we must move startPos to 0x400 (stream start position), remove 0x400 bytes of the sourcebuff, and reduce the available buffer size by 0x400
 	// this is very important for ID3 tag mp3, since our universal audio decoder is for decoding stream part only.

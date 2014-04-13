@@ -54,7 +54,7 @@ public:
 	bool IsOK() const { return codec_ != 0; }
 	int getOutSamples();
 	int getSourcePos();
-	bool ResetCodecCtx(int channels, int samplerate);
+	bool ResetCodecCtx(int channels, int samplerate, int bitrate);
 	void setResampleFrequency(int freq);
 
 	u32 ctxPtr;
