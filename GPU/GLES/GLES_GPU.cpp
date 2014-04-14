@@ -115,7 +115,7 @@ static const CommandTableEntry commandTable[] = {
 
 	// These affect the fragment shader so need flushing.
 	{GE_CMD_CLEARMODE, FLAG_FLUSHBEFOREONCHANGE},
-	{GE_CMD_TEXTUREMAPENABLE, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE},
+	{GE_CMD_TEXTUREMAPENABLE, FLAG_FLUSHBEFOREONCHANGE},
 	{GE_CMD_FOGENABLE, FLAG_FLUSHBEFOREONCHANGE},
 	{GE_CMD_TEXMODE, FLAG_FLUSHBEFOREONCHANGE | FLAG_EXECUTEONCHANGE},
 	{GE_CMD_TEXSHADELS, FLAG_FLUSHBEFOREONCHANGE},
@@ -610,7 +610,7 @@ void GLES_GPU::CopyDisplayToOutputInternal() {
 #endif
 #endif
 
-	gstate_c.textureChanged = true;
+	gstate_c.textureChanged = TEXCHANGE_UPDATED;
 }
 
 // Maybe should write this in ASM...
@@ -906,7 +906,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_REGION1:
 	case GE_CMD_REGION2:
 		gstate_c.framebufChanged = true;
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_CLIPENABLE:
@@ -918,7 +918,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 		break;
 
 	case GE_CMD_TEXTUREMAPENABLE:
-		gstate_c.textureChanged = true;
+		// Don't need to dirty the texture here, already dirtied at list start/etc.
 		break;
 
 	case GE_CMD_LIGHTINGENABLE:
@@ -968,7 +968,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_SCISSOR1:
 	case GE_CMD_SCISSOR2:
 		gstate_c.framebufChanged = true;
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 		///
@@ -980,11 +980,11 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_FRAMEBUFWIDTH:
 	case GE_CMD_FRAMEBUFPIXFORMAT:
 		gstate_c.framebufChanged = true;
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_TEXADDR0:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged = TEXCHANGE_UPDATED;
 		shaderManager_->DirtyUniform(DIRTY_UVSCALEOFFSET);
 		break;
 
@@ -995,10 +995,13 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_TEXADDR5:
 	case GE_CMD_TEXADDR6:
 	case GE_CMD_TEXADDR7:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_TEXBUFWIDTH0:
+		gstate_c.textureChanged = TEXCHANGE_UPDATED;
+		break;
+
 	case GE_CMD_TEXBUFWIDTH1:
 	case GE_CMD_TEXBUFWIDTH2:
 	case GE_CMD_TEXBUFWIDTH3:
@@ -1006,11 +1009,11 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_TEXBUFWIDTH5:
 	case GE_CMD_TEXBUFWIDTH6:
 	case GE_CMD_TEXBUFWIDTH7:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_CLUTFORMAT:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		// This could be used to "dirty" textures with clut.
 		break;
 
@@ -1020,7 +1023,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 		break;
 
 	case GE_CMD_LOADCLUT:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		textureCache_.LoadClut();
 		// This could be used to "dirty" textures with clut.
 		break;
@@ -1051,19 +1054,19 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 			DoBlockTransfer();
 
 			// Fixes Gran Turismo's funky text issue, since it overwrites the current texture.
-			gstate_c.textureChanged = true;
+			gstate_c.textureChanged = TEXCHANGE_UPDATED;
 			break;
 		}
 
 	case GE_CMD_TEXSIZE0:
 		// Render to texture may have overridden the width/height.
 		// Don't reset it unless the size is different / the texture has changed.
-		if (diff || gstate_c.textureChanged) {
+		if (diff || gstate_c.textureChanged != TEXCHANGE_UNCHANGED) {
 			gstate_c.curTextureWidth = gstate.getTextureWidth(0);
 			gstate_c.curTextureHeight = gstate.getTextureHeight(0);
 			shaderManager_->DirtyUniform(DIRTY_UVSCALEOFFSET);
 			// We will need to reset the texture now.
-			gstate_c.textureChanged = true;
+			gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		}
 		break;
 
@@ -1074,7 +1077,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_TEXSIZE5:
 	case GE_CMD_TEXSIZE6:
 	case GE_CMD_TEXSIZE7:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_ZBUFPTR:
@@ -1195,7 +1198,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_VIEWPORTZ1:
 	case GE_CMD_VIEWPORTZ2:
 		gstate_c.framebufChanged = true;
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	case GE_CMD_LIGHTENABLE0:
@@ -1262,11 +1265,14 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 	case GE_CMD_TEXFLUSH:
 		break;
 
-	case GE_CMD_TEXMODE:
 	case GE_CMD_TEXFORMAT:
+		gstate_c.textureChanged = TEXCHANGE_UPDATED;
+		break;
+
+	case GE_CMD_TEXMODE:
 	case GE_CMD_TEXFILTER:
 	case GE_CMD_TEXWRAP:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	//////////////////////////////////////////////////////////////////
@@ -1545,7 +1551,7 @@ void GLES_GPU::ExecuteOpInternal(u32 op, u32 diff) {
 #endif
 
 	case GE_CMD_TEXLEVEL:
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged |= TEXCHANGE_PARAMSONLY;
 		break;
 
 	//////////////////////////////////////////////////////////////////
@@ -1692,14 +1698,22 @@ void GLES_GPU::DoBlockTransfer() {
 	// Do the copy! (Hm, if we detect a drawn video frame (see below) then we could maybe skip this?)
 	// Can use GetPointerUnchecked because we checked the addresses above. We could also avoid them
 	// entirely by walking a couple of pointers...
-	// GetPointerUnchecked crash in windows 64 bit of issue 2301
-	for (int y = 0; y < height; y++) {
-		u32 srcLineStartAddr = srcBasePtr + ((y + srcY) * srcStride + srcX) * bpp;
-		u32 dstLineStartAddr = dstBasePtr + ((y + dstY) * dstStride + dstX) * bpp;
-
+	if (srcStride == dstStride && width == srcStride) {
+		// Common case in God of War, let's do it all in one chunk.
+		u32 srcLineStartAddr = srcBasePtr + (srcY * srcStride + srcX) * bpp;
+		u32 dstLineStartAddr = dstBasePtr + (dstY * dstStride + dstX) * bpp;
 		const u8 *src = Memory::GetPointerUnchecked(srcLineStartAddr);
 		u8 *dst = Memory::GetPointerUnchecked(dstLineStartAddr);
-		memcpy(dst, src, width * bpp);
+		memcpy(dst, src, width * height * bpp);
+	} else {
+		for (int y = 0; y < height; y++) {
+			u32 srcLineStartAddr = srcBasePtr + ((y + srcY) * srcStride + srcX) * bpp;
+			u32 dstLineStartAddr = dstBasePtr + ((y + dstY) * dstStride + dstX) * bpp;
+
+			const u8 *src = Memory::GetPointerUnchecked(srcLineStartAddr);
+			u8 *dst = Memory::GetPointerUnchecked(dstLineStartAddr);
+			memcpy(dst, src, width * bpp);
+		}
 	}
 
 	// TODO: Notify all overlapping FBOs that they need to reload.
@@ -1785,7 +1799,7 @@ void GLES_GPU::DoState(PointerWrap &p) {
 		textureCache_.Clear(true);
 		transformDraw_.ClearTrackedVertexArrays();
 
-		gstate_c.textureChanged = true;
+		gstate_c.textureChanged = TEXCHANGE_UPDATED;
 		framebufferManager_.DestroyAllFBOs();
 	}
 }

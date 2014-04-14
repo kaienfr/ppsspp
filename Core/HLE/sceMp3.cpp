@@ -326,6 +326,11 @@ int sceMp3Init(u32 mp3) {
 
 	INFO_LOG(ME, "sceMp3Init(): channels=%i, samplerate=%iHz, bitrate=%ikbps", ctx->Channels, ctx->SamplingRate, ctx->BitRate);
 
+	// Read information from source via ffmpeg and re-create codec context
+	// This is an automatic method without knowledge in audio file format
+	// ctx->AuCreateCodecContextFromSource();
+	// INFO_LOG(ME, "sceMp3Init() ffmpeg: channels=%i, samplerate=%iHz, bitrate=%ikbps", ctx->Channels, ctx->SamplingRate, ctx->BitRate);
+
 	// for mp3, if required freq is 48000, reset resampling Frequency to 48000 seems get better sound quality (e.g. Miku Custom BGM)
 	if (ctx->freq == 48000){
 		ctx->decoder->setResampleFrequency(ctx->freq);
@@ -483,8 +488,13 @@ u32 sceMp3StartEntry() {
 }
 
 u32 sceMp3GetFrameNum(u32 mp3) {
-	ERROR_LOG_REPORT(ME, "UNIMPL sceMp3GetFrameNum(%08x)", mp3);
-	return 0;
+	INFO_LOG(ME, "sceMp3GetFrameNum(%08x)", mp3);
+	AuCtx *ctx = getMp3Ctx(mp3);
+	if (!ctx) {
+		ERROR_LOG(ME, "%s: bad mp3 handle %08x", __FUNCTION__, mp3);
+		return -1;
+	}
+	return ctx->AuGetFrameNum();
 }
 
 u32 sceMp3GetMPEGVersion(u32 mp3) {
