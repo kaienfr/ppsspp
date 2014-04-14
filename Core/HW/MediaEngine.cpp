@@ -175,7 +175,7 @@ void MediaEngine::closeMedia() {
 }
 
 void MediaEngine::DoState(PointerWrap &p){
-	auto s = p.Section("MediaEngine", 1, 2);
+	auto s = p.Section("MediaEngine", 1, 3);
 	if (!s)
 		return;
 
@@ -213,8 +213,11 @@ void MediaEngine::DoState(PointerWrap &p){
 
 	p.Do(m_isVideoEnd);
 	p.Do(m_noAudioData);
-	if (s > 2){
+	if (s >= 3){
 		p.Do(m_audioType);
+	}
+	else{
+		m_audioType = PSP_CODEC_AT3PLUS;
 	}
 }
 
@@ -283,7 +286,7 @@ bool MediaEngine::openContext() {
 		return false;
 
 	setVideoDim();
-	m_audioContext = AudioCreate(m_audioType);
+	m_audioContext = new SimpleAudio(m_audioType);
 	m_isVideoEnd = false;
 	m_noAudioData = false;
 	m_mpegheaderReadPos++;
@@ -298,9 +301,9 @@ void MediaEngine::closeContext()
 	if (m_buffer)
 		av_free(m_buffer);
 	if (m_pFrameRGB)
-		av_free(m_pFrameRGB);
+		av_frame_free(&m_pFrameRGB);
 	if (m_pFrame)
-		av_free(m_pFrame);
+		av_frame_free(&m_pFrame);
 	if (m_pIOContext && m_pIOContext->buffer)
 		av_free(m_pIOContext->buffer);
 	if (m_pIOContext)
@@ -310,10 +313,9 @@ void MediaEngine::closeContext()
 	m_pCodecCtxs.clear();
 	if (m_pFormatCtx)
 		avformat_close_input(&m_pFormatCtx);
-	m_pFrame = 0;
-	m_pFrameRGB = 0;
+	sws_freeContext(m_sws_ctx);
+	m_sws_ctx = NULL;
 	m_pIOContext = 0;
-	m_pFormatCtx = 0;
 #endif
 	m_buffer = 0;
 }
@@ -412,6 +414,7 @@ bool MediaEngine::setVideoDim(int width, int height)
 	// Allocate video frame
 	m_pFrame = av_frame_alloc();
 
+	sws_freeContext(m_sws_ctx);
 	m_sws_ctx = NULL;
 	m_sws_fmt = -1;
 	updateSwsFormat(GE_CMODE_32BIT_ABGR8888);
@@ -471,6 +474,7 @@ bool MediaEngine::stepVideo(int videoPixelMode) {
 	m_pFrameRGB->linesize[0] = getPixelFormatBytes(videoPixelMode) * m_desWidth;
 
 	AVPacket packet;
+	av_init_packet(&packet);
 	int frameFinished;
 	bool bGetFrame = false;
 	while (!bGetFrame) {
@@ -738,7 +742,7 @@ int MediaEngine::getAudioSamples(u32 bufferPtr) {
 	int outbytes = 0;
 
 	if (m_audioContext != NULL) {
-		if (!AudioDecode(m_audioContext, audioFrame, frameSize, &outbytes, buffer)) {
+		if (!m_audioContext->Decode(audioFrame, frameSize, buffer, &outbytes)) {
 			ERROR_LOG(ME, "Audio (%s) decode failed during video playback", GetCodecName(m_audioType));
 		}
 	}

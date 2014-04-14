@@ -12,6 +12,7 @@
 #include "Core/Reporting.h"
 #include "Core/HLE/sceKernelMemory.h"
 #include "Core/HLE/sceKernelInterrupt.h"
+#include "Core/HLE/sceKernelThread.h"
 #include "Core/HLE/sceGe.h"
 
 GPUCommon::GPUCommon() :
@@ -84,7 +85,7 @@ u32 GPUCommon::DrawSync(int mode) {
 		}
 
 		if (drawCompleteTicks > CoreTiming::GetTicks()) {
-			__GeWaitCurrentThread(WAITTYPE_GEDRAWSYNC, 1, "GeDrawSync");
+			__GeWaitCurrentThread(GPU_SYNC_DRAW, 1, "GeDrawSync");
 		} else {
 			for (int i = 0; i < DisplayListMaxCount; ++i) {
 				if (dls[i].state == PSP_GE_DL_STATE_COMPLETED) {
@@ -165,7 +166,7 @@ int GPUCommon::ListSync(int listid, int mode) {
 	}
 
 	if (dl.waitTicks > CoreTiming::GetTicks()) {
-		__GeWaitCurrentThread(WAITTYPE_GELISTSYNC, listid, "GeListSync");
+		__GeWaitCurrentThread(GPU_SYNC_LIST, listid, "GeListSync");
 	}
 	return PSP_GE_LIST_COMPLETED;
 }
@@ -313,7 +314,7 @@ u32 GPUCommon::DequeueList(int listid) {
 		dlQueue.remove(listid);
 
 	dl.waitTicks = 0;
-	__GeTriggerWait(WAITTYPE_GELISTSYNC, listid);
+	__GeTriggerWait(GPU_SYNC_LIST, listid);
 
 	CheckDrawSync();
 
@@ -329,9 +330,6 @@ u32 GPUCommon::UpdateStall(int listid, u32 newstall) {
 		return SCE_KERNEL_ERROR_ALREADY;
 
 	dl.stall = newstall & 0x0FFFFFFF;
-
-	if (dl.signal == PSP_GE_SIGNAL_HANDLER_PAUSE)
-		dl.signal = PSP_GE_SIGNAL_HANDLER_SUSPEND;
 	
 	guard.unlock();
 	ProcessDLQueue();
@@ -348,8 +346,8 @@ u32 GPUCommon::Continue() {
 	{
 		if (!isbreak)
 		{
-			if (currentList->signal == PSP_GE_SIGNAL_HANDLER_PAUSE)
-				return 0x80000021;
+			// TODO: Supposedly this returns SCE_KERNEL_ERROR_BUSY in some case, previously it had
+			// currentList->signal == PSP_GE_SIGNAL_HANDLER_PAUSE, but it doesn't reproduce.
 
 			currentList->state = PSP_GE_DL_STATE_RUNNING;
 			currentList->signal = PSP_GE_SIGNAL_NONE;
@@ -456,9 +454,8 @@ bool GPUCommon::InterpretList(DisplayList &list) {
 
 	easy_guard guard(listLock);
 
-	// TODO: This has to be right... but it freezes right now?
-	//if (list.state == PSP_GE_DL_STATE_PAUSED)
-	//	return false;
+	if (list.state == PSP_GE_DL_STATE_PAUSED)
+		return false;
 	currentList = &list;
 
 	if (!list.started && list.context.IsValid()) {
@@ -558,17 +555,19 @@ void GPUCommon::SlowRunLoop(DisplayList &list)
 // The newPC parameter is used for jumps, we don't count cycles between.
 void GPUCommon::UpdatePC(u32 currentPC, u32 newPC) {
 	// Rough estimate, 2 CPU ticks (it's double the clock rate) per GPU instruction.
-	int executed = (currentPC - cycleLastPC) / 4;
+	u32 executed = (currentPC - cycleLastPC) / 4;
 	cyclesExecuted += 2 * executed;
-	gpuStats.otherGPUCycles += 2 * executed;
-	cycleLastPC = newPC == 0 ? currentPC : newPC;
+	cycleLastPC = newPC;
 
-	gpuStats.gpuCommandsAtCallLevel[std::min(currentList->stackptr, 3)] += executed;
+	if (g_Config.bShowDebugStats) {
+		gpuStats.otherGPUCycles += 2 * executed;
+		gpuStats.gpuCommandsAtCallLevel[std::min(currentList->stackptr, 3)] += executed;
+	}
 
 	// Exit the runloop and recalculate things.  This happens a lot in some games.
 	easy_guard innerGuard(listLock);
 	if (currentList)
-		downcount = currentList->stall == 0 ? 0x0FFFFFFF : (currentList->stall - cycleLastPC) / 4;
+		downcount = currentList->stall == 0 ? 0x0FFFFFFF : (currentList->stall - newPC) / 4;
 	else
 		downcount = 0;
 }
@@ -649,7 +648,7 @@ void GPUCommon::ProcessDLQueueInternal() {
 	UpdateTickEstimate(std::max(busyTicks, startingTicks + cyclesExecuted));
 
 	// Game might've written new texture data.
-	gstate_c.textureChanged = true;
+	gstate_c.textureChanged = TEXCHANGE_UPDATED;
 
 	// Seems to be correct behaviour to process the list anyway?
 	if (startingTicks < busyTicks) {
@@ -675,7 +674,7 @@ void GPUCommon::ProcessDLQueueInternal() {
 
 	drawCompleteTicks = startingTicks + cyclesExecuted;
 	busyTicks = std::max(busyTicks, drawCompleteTicks);
-	__GeTriggerSync(WAITTYPE_GEDRAWSYNC, 1, drawCompleteTicks);
+	__GeTriggerSync(GPU_SYNC_DRAW, 1, drawCompleteTicks);
 	// Since the event is in CoreTiming, we're in sync.  Just set 0 now.
 	UpdateTickEstimate(0);
 }
@@ -805,21 +804,33 @@ void GPUCommon::ExecuteOp(u32 op, u32 diff) {
 
 				switch (behaviour) {
 				case PSP_GE_SIGNAL_HANDLER_SUSPEND:
+					// Suspend the list, and call the signal handler.  When it's done, resume.
+					// Before sdkver 0x02000010, listsync should return paused.
 					if (sceKernelGetCompiledSdkVersion() <= 0x02000010)
 						currentList->state = PSP_GE_DL_STATE_PAUSED;
 					currentList->signal = behaviour;
-					DEBUG_LOG(G3D, "Signal with Wait UNIMPLEMENTED! signal/end: %04x %04x", signal, enddata);
+					DEBUG_LOG(G3D, "Signal with wait. signal/end: %04x %04x", signal, enddata);
 					break;
 				case PSP_GE_SIGNAL_HANDLER_CONTINUE:
+					// Resume the list right away, then call the handler.
 					currentList->signal = behaviour;
 					DEBUG_LOG(G3D, "Signal without wait. signal/end: %04x %04x", signal, enddata);
 					break;
 				case PSP_GE_SIGNAL_HANDLER_PAUSE:
-					currentList->state = PSP_GE_DL_STATE_PAUSED;
+					// Pause the list instead of ending at the next FINISH.
+					// Call the handler with the PAUSE signal value at that FINISH.
+					// Technically, this ought to trigger an interrupt, but it won't do anything.
+					// But right now, signal is always reset by interrupts, so that causes pause to not work.
+					trigger = false;
 					currentList->signal = behaviour;
-					ERROR_LOG_REPORT(G3D, "Signal with Pause UNIMPLEMENTED! signal/end: %04x %04x", signal, enddata);
+					DEBUG_LOG(G3D, "Signal with Pause. signal/end: %04x %04x", signal, enddata);
 					break;
 				case PSP_GE_SIGNAL_SYNC:
+					// Acts as a memory barrier, never calls any user code.
+					// Technically, this ought to trigger an interrupt, but it won't do anything.
+					// Triggering here can cause incorrect rescheduling, which breaks 3rd Birthday.
+					// However, this is likely a bug in how GE signal interrupts are handled.
+					trigger = false;
 					currentList->signal = behaviour;
 					DEBUG_LOG(G3D, "Signal with Sync. signal/end: %04x %04x", signal, enddata);
 					break;
@@ -893,6 +904,7 @@ void GPUCommon::ExecuteOp(u32 op, u32 diff) {
 		case GE_CMD_FINISH:
 			switch (currentList->signal) {
 			case PSP_GE_SIGNAL_HANDLER_PAUSE:
+				currentList->state = PSP_GE_DL_STATE_PAUSED;
 				if (currentList->interruptsEnabled) {
 					if (__GeTriggerInterrupt(currentList->id, currentList->pc, startingTicks + cyclesExecuted)) {
 						currentList->pendingInterrupt = true;
@@ -908,14 +920,14 @@ void GPUCommon::ExecuteOp(u32 op, u32 diff) {
 
 			default:
 				currentList->subIntrToken = prev & 0xFFFF;
-				currentList->state = PSP_GE_DL_STATE_COMPLETED;
 				UpdateState(GPUSTATE_DONE);
 				if (currentList->interruptsEnabled && __GeTriggerInterrupt(currentList->id, currentList->pc, startingTicks + cyclesExecuted)) {
 					currentList->pendingInterrupt = true;
 				} else {
+					currentList->state = PSP_GE_DL_STATE_COMPLETED;
 					currentList->waitTicks = startingTicks + cyclesExecuted;
 					busyTicks = std::max(busyTicks, currentList->waitTicks);
-					__GeTriggerSync(WAITTYPE_GELISTSYNC, currentList->id, currentList->waitTicks);
+					__GeTriggerSync(GPU_SYNC_LIST, currentList->id, currentList->waitTicks);
 					if (currentList->started && currentList->context.IsValid()) {
 						gstate.Restore(currentList->context);
 						ReapplyGfxStateInternal();
@@ -1020,20 +1032,17 @@ void GPUCommon::InterruptEnd(int listid) {
 			ReapplyGfxState();
 		}
 		dl.waitTicks = 0;
-		__GeTriggerWait(WAITTYPE_GELISTSYNC, listid);
+		__GeTriggerWait(GPU_SYNC_LIST, listid);
 	}
-
-	if (dl.signal == PSP_GE_SIGNAL_HANDLER_PAUSE)
-		dl.signal = PSP_GE_SIGNAL_HANDLER_SUSPEND;
 
 	guard.unlock();
 	ProcessDLQueue();
 }
 
 // TODO: Maybe cleaner to keep this in GE and trigger the clear directly?
-void GPUCommon::SyncEnd(WaitType waitType, int listid, bool wokeThreads) {
+void GPUCommon::SyncEnd(GPUSyncType waitType, int listid, bool wokeThreads) {
 	easy_guard guard(listLock);
-	if (waitType == WAITTYPE_GEDRAWSYNC && wokeThreads)
+	if (waitType == GPU_SYNC_DRAW && wokeThreads)
 	{
 		for (int i = 0; i < DisplayListMaxCount; ++i) {
 			if (dls[i].state == PSP_GE_DL_STATE_COMPLETED) {

@@ -23,7 +23,7 @@ public:
 
 	virtual void InterruptStart(int listid);
 	virtual void InterruptEnd(int listid);
-	virtual void SyncEnd(WaitType waitType, int listid, bool wokeThreads);
+	virtual void SyncEnd(GPUSyncType waitType, int listid, bool wokeThreads);
 	virtual void EnableInterrupts(bool enable) {
 		interruptsEnabled_ = enable;
 	}
@@ -81,7 +81,10 @@ protected:
 	// To avoid virtual calls to PreExecuteOp().
 	virtual void FastRunLoop(DisplayList &list) = 0;
 	void SlowRunLoop(DisplayList &list);
-	void UpdatePC(u32 currentPC, u32 newPC = 0);
+	void UpdatePC(u32 currentPC, u32 newPC);
+	void UpdatePC(u32 currentPC) {
+		UpdatePC(currentPC, currentPC);
+	}
 	void UpdateState(GPUState state);
 	void PopDLQueue();
 	void CheckDrawSync();
